@@ -1,4 +1,6 @@
 import regex as re
+import pickle
+from collections.abc import Iterable
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
 
@@ -9,9 +11,11 @@ def train_bpe(input_path: str, vocab_size: int, special_tokens: list[str]):
         vocab[current_idx] = special_token.encode("utf-8")
         current_idx += 1
     
-    merge: list[tuple[bytes,bytes]] = []
+    merges: list[tuple[bytes,bytes]] = []
 
-    ordered_special_tokens = sorted(special_tokens, key = len, reverse = True)
+    ordered_special_tokens = None
+    if special_tokens:
+        ordered_special_tokens = sorted(special_tokens, key = len, reverse = True)
     with open(input_path, "r", encoding = "utf-8") as f:
         text = f.read()
     text_segments: list[str] = []
@@ -20,14 +24,15 @@ def train_bpe(input_path: str, vocab_size: int, special_tokens: list[str]):
     while i < len(text):
         is_special_token = False
 
-        for special_token in ordered_special_tokens:
-            if text.startswith(special_token, i):
-                if not (current_str == ""):
-                    text_segments.append(current_str)
-                current_str = ""
-                i += len(special_token)
-                is_special_token = True
-                break
+        if ordered_special_tokens:
+            for special_token in ordered_special_tokens:
+                if text.startswith(special_token, i):
+                    if not (current_str == ""):
+                        text_segments.append(current_str)
+                    current_str = ""
+                    i += len(special_token)
+                    is_special_token = True
+                    break
 
         if not is_special_token:
             current_str += text[i]
@@ -69,7 +74,7 @@ def train_bpe(input_path: str, vocab_size: int, special_tokens: list[str]):
                 max_counts = counts
         if max_pair == None:
             break
-        merge.append(max_pair)
+        merges.append(max_pair)
         merged_bytes = max_pair[0] + max_pair[1]
         vocab[current_idx] = merged_bytes
         current_idx += 1
@@ -90,4 +95,110 @@ def train_bpe(input_path: str, vocab_size: int, special_tokens: list[str]):
                     i += 1
             pretoken_token_sequences[pretoken_bytes] = new_seq
 
-    return vocab, merge
+    return vocab, merges
+
+class Tokenizer:
+
+    def __init__(self, vocab: dict[int,bytes], merges: list[tuple[bytes,bytes]], special_tokens: list[str] | None = None):
+        self.vocab = dict(vocab)
+        self.merges = list(merges)
+
+        self.bytes_to_id: dict[bytes,int] = {
+            v: k for k,v in self.vocab.items()
+        }
+        self.special_tokens = special_tokens
+        
+        if special_tokens:
+            current_idx = len(self.vocab)
+            for token in special_tokens:
+                token_bytes = token.encode("utf-8")
+                if token_bytes not in self.bytes_to_id:
+                    self.bytes_to_id[token_bytes] = current_idx
+                    self.vocab[current_idx] = token_bytes
+                    current_idx += 1
+    
+    @classmethod
+    def from_files(cls, vocab_filepath: str, merges_filepath: str, special_tokens: list[str] | None = None):
+        with open(vocab_filepath,"rb") as f:
+            vocab = pickle.load(f)
+        with open(merges_filepath,"rb") as f:
+            merges = pickle.load(f)
+        tokenizer = cls(vocab, merges, special_tokens)
+        return tokenizer
+    
+    def decode(self, ids: list[int]):
+        final_bytes = b"".join(self.vocab[idx] for idx in ids)
+        string = bytes.decode(final_bytes, "utf-8", "replace")
+        return string
+    
+    def encode(self, text: str):
+        text_segments: list[str] = []
+        ordered_special_tokens = None
+        if self.special_tokens:
+            ordered_special_tokens = sorted(self.special_tokens, key=len, reverse=True)
+        i = 0
+        current_str = ""
+        while i < len(text):
+            is_special_token = False
+            if ordered_special_tokens:
+                for special_token in ordered_special_tokens:
+                    if text.startswith(special_token, i):
+                        is_special_token = True
+                        if not (current_str == ""):
+                            text_segments.append(current_str)
+                        current_str = ""
+                        text_segments.append(special_token)
+                        i += len(special_token)
+                        break
+            if not is_special_token:
+                current_str += text[i]
+                i += 1
+        if not (current_str == ""):
+            text_segments.append(current_str)
+        
+        pretoken: list[list[bytes]] = []
+        for text_segment in text_segments:
+            is_special_token = False
+            if ordered_special_tokens:
+                for special_token in ordered_special_tokens:
+                    if text_segment == special_token:
+                        is_special_token = True
+                        break
+            if is_special_token:
+                pretoken.append([text_segment.encode("utf-8")])
+            else:
+                for match in re.finditer(PAT, text_segment):
+                    m = match.group(0).encode("utf-8")
+                    pretoken.append([bytes([b]) for b in m])
+        
+        for merge in self.merges:
+            merge1, merge2 = merge
+            merged = merge1 + merge2
+            for i, token_seq in enumerate(pretoken):
+                new_seq = []
+                j = 0
+                while j < len(token_seq):
+                    if j + 1 < len(token_seq) and token_seq[j] == merge1 and token_seq[j + 1] == merge2:
+                        new_seq.append(merged)
+                        j += 2
+                    else:
+                        new_seq.append(token_seq[j])
+                        j += 1
+                pretoken[i] = new_seq
+        
+        tokens: list[int] = []
+        for token_seq in pretoken:
+            for b in token_seq:
+                tokens.append(self.bytes_to_id[b])
+        return tokens
+    
+    def encode_iterable(self, iterable: Iterable[str]):
+        return
+
+
+
+
+
+
+
+    
