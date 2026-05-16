@@ -99,7 +99,7 @@ class Tokenizer:
     def __init__(self, vocab: dict[int,bytes], merges: list[tuple[bytes,bytes]], special_tokens: list[str] | None = None):
         self.vocab = dict(vocab)
         self.merges = list(merges)
-
+        self.merge_rank: dict[tuple[bytes, bytes], int] = {b : rk for rk, b in enumerate(merges)}
         self.bytes_to_id: dict[bytes,int] = {
             v: k for k,v in self.vocab.items()
         }
@@ -130,6 +130,39 @@ class Tokenizer:
         final_bytes = b"".join(self.vocab[idx] for idx in ids)
         string = bytes.decode(final_bytes, "utf-8", "replace")
         return string
+
+    def encode_pretoken(self, pretoken: list[bytes]):
+        while True:
+            target = None
+            priority = None
+            i = 0
+            while i + 1 < len(pretoken):
+                merged_bytes = (pretoken[i],pretoken[i + 1])
+                if merged_bytes in self.merge_rank:
+                    if priority is None:
+                        priority = self.merge_rank[merged_bytes]
+                        target = merged_bytes
+                    elif self.merge_rank[merged_bytes] < priority:
+                        priority = self.merge_rank[merged_bytes]
+                        target = merged_bytes
+                i += 1
+            if target is None:
+                break
+            i = 0
+            new_seq: list[bytes] = []
+            while i < len(pretoken):
+                if i + 1 < len(pretoken) and target == (pretoken[i], pretoken[i + 1]):
+                    new_seq.append(pretoken[i] + pretoken[i + 1])
+                    i += 2
+                else:
+                    new_seq.append(pretoken[i])
+                    i += 1
+            pretoken = new_seq
+        
+        tokens: list[int] = []
+        for b in pretoken:
+            tokens.append(self.bytes_to_id[b])
+        return tokens
     
     def encode(self, text: str):
         text_segments: list[str] = []
@@ -153,7 +186,7 @@ class Tokenizer:
         if not (current_str == ""):
             text_segments.append(current_str)
         
-        pretoken: list[list[bytes]] = []
+        pretokens: list[list[bytes]] = []
         for text_segment in text_segments:
             is_special_token = False
             for special_token in ordered_special_tokens:
@@ -161,31 +194,16 @@ class Tokenizer:
                     is_special_token = True
                     break
             if is_special_token:
-                pretoken.append([text_segment.encode("utf-8")])
+                pretokens.append([text_segment.encode("utf-8")])
             else:
                 for match in re.finditer(PAT, text_segment):
                     m = match.group(0).encode("utf-8")
-                    pretoken.append([bytes([b]) for b in m])
-        
-        for merge in self.merges:
-            merge1, merge2 = merge
-            merged = merge1 + merge2
-            for i, token_seq in enumerate(pretoken):
-                new_seq = []
-                j = 0
-                while j < len(token_seq):
-                    if j + 1 < len(token_seq) and token_seq[j] == merge1 and token_seq[j + 1] == merge2:
-                        new_seq.append(merged)
-                        j += 2
-                    else:
-                        new_seq.append(token_seq[j])
-                        j += 1
-                pretoken[i] = new_seq
-        
+                    pretokens.append([bytes([b]) for b in m])
+
         tokens: list[int] = []
-        for token_seq in pretoken:
-            for b in token_seq:
-                tokens.append(self.bytes_to_id[b])
+        for pretoken in pretokens:
+            tokens.extend(self.encode_pretoken(pretoken))
+
         return tokens
     
     def encode_iterable(self, iterable: Iterable[str]):
@@ -196,7 +214,6 @@ class Tokenizer:
             max_len = 0
         for chunk in iterable:
             buffer += chunk
-            tokens: list[int] = []
             buffer_suffixes: list[str] = []
             protected_suffix = ""
             for i in range(min(max_len,len(buffer)), 0, -1):
@@ -213,8 +230,8 @@ class Tokenizer:
                 while i < len(buffer):
                     for special_token in self.ordered_special_tokens:
                         if buffer.startswith(special_token, i):
-                            tokens.extend(self.encode(buffer[st: i]))
-                            tokens.append(self.bytes_to_id[special_token.encode("utf-8")])
+                            yield from self.encode(buffer[st: i])
+                            yield self.bytes_to_id[special_token.encode("utf-8")]
                             st = i + len(special_token)
                             i = i + len(special_token) - 1
                             break
@@ -225,18 +242,12 @@ class Tokenizer:
             matchs = re.findall(PAT, buffer)
             matchs = matchs[:-1]
             for match in matchs:
-                tokens.extend(self.encode(match))
+                yield from self.encode(match)
                 total_len += len(match)
             buffer = buffer[total_len:]
-
             buffer = buffer + protected_suffix
 
-            for token in tokens:
-                yield token
-        
-        tokens = self.encode(buffer)
-        for token in tokens:
-            yield token
+        yield from self.encode(buffer)
         
 
 
