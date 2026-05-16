@@ -13,9 +13,7 @@ def train_bpe(input_path: str, vocab_size: int, special_tokens: list[str]):
     
     merges: list[tuple[bytes,bytes]] = []
 
-    ordered_special_tokens = None
-    if special_tokens:
-        ordered_special_tokens = sorted(special_tokens, key = len, reverse = True)
+    ordered_special_tokens = sorted(special_tokens, key = len, reverse = True)
     with open(input_path, "r", encoding = "utf-8") as f:
         text = f.read()
     text_segments: list[str] = []
@@ -24,15 +22,14 @@ def train_bpe(input_path: str, vocab_size: int, special_tokens: list[str]):
     while i < len(text):
         is_special_token = False
 
-        if ordered_special_tokens:
-            for special_token in ordered_special_tokens:
-                if text.startswith(special_token, i):
-                    if not (current_str == ""):
-                        text_segments.append(current_str)
-                    current_str = ""
-                    i += len(special_token)
-                    is_special_token = True
-                    break
+        for special_token in ordered_special_tokens:
+            if text.startswith(special_token, i):
+                if not (current_str == ""):
+                    text_segments.append(current_str)
+                current_str = ""
+                i += len(special_token)
+                is_special_token = True
+                break
 
         if not is_special_token:
             current_str += text[i]
@@ -107,6 +104,9 @@ class Tokenizer:
             v: k for k,v in self.vocab.items()
         }
         self.special_tokens = special_tokens
+        if self.special_tokens is None:
+            self.special_tokens = []
+        self.ordered_special_tokens = sorted(self.special_tokens, key = len,reverse=True)
         
         if special_tokens:
             current_idx = len(self.vocab)
@@ -133,23 +133,20 @@ class Tokenizer:
     
     def encode(self, text: str):
         text_segments: list[str] = []
-        ordered_special_tokens = None
-        if self.special_tokens:
-            ordered_special_tokens = sorted(self.special_tokens, key=len, reverse=True)
+        ordered_special_tokens = self.ordered_special_tokens
         i = 0
         current_str = ""
         while i < len(text):
             is_special_token = False
-            if ordered_special_tokens:
-                for special_token in ordered_special_tokens:
-                    if text.startswith(special_token, i):
-                        is_special_token = True
-                        if not (current_str == ""):
-                            text_segments.append(current_str)
-                        current_str = ""
-                        text_segments.append(special_token)
-                        i += len(special_token)
-                        break
+            for special_token in ordered_special_tokens:
+                if text.startswith(special_token, i):
+                    is_special_token = True
+                    if not (current_str == ""):
+                        text_segments.append(current_str)
+                    current_str = ""
+                    text_segments.append(special_token)
+                    i += len(special_token)
+                    break
             if not is_special_token:
                 current_str += text[i]
                 i += 1
@@ -159,11 +156,10 @@ class Tokenizer:
         pretoken: list[list[bytes]] = []
         for text_segment in text_segments:
             is_special_token = False
-            if ordered_special_tokens:
-                for special_token in ordered_special_tokens:
-                    if text_segment == special_token:
-                        is_special_token = True
-                        break
+            for special_token in ordered_special_tokens:
+                if text_segment == special_token:
+                    is_special_token = True
+                    break
             if is_special_token:
                 pretoken.append([text_segment.encode("utf-8")])
             else:
@@ -193,7 +189,55 @@ class Tokenizer:
         return tokens
     
     def encode_iterable(self, iterable: Iterable[str]):
-        return
+        buffer: str = ""
+        if not len(self.ordered_special_tokens) == 0:
+            max_len = len(self.ordered_special_tokens[0])
+        else:
+            max_len = 0
+        for chunk in iterable:
+            buffer += chunk
+            tokens: list[int] = []
+            buffer_suffixes: list[str] = []
+            protected_suffix = ""
+            for i in range(min(max_len,len(buffer)), 0, -1):
+                buffer_suffixes.append(buffer[-i:])
+            for suffix in buffer_suffixes:
+                if any(special_token.startswith(suffix) for special_token in self.ordered_special_tokens):
+                    protected_suffix = buffer[-len(suffix):]
+                    buffer = buffer[:-len(suffix)]
+                    break
+            
+            if len(self.ordered_special_tokens) > 0:
+                i = 0
+                st = 0
+                while i < len(buffer):
+                    for special_token in self.ordered_special_tokens:
+                        if buffer.startswith(special_token, i):
+                            tokens.extend(self.encode(buffer[st: i]))
+                            tokens.append(self.bytes_to_id[special_token.encode("utf-8")])
+                            st = i + len(special_token)
+                            i = i + len(special_token) - 1
+                            break
+                    i += 1
+                buffer = buffer[st:]
+
+            total_len = 0
+            matchs = re.findall(PAT, buffer)
+            matchs = matchs[:-1]
+            for match in matchs:
+                tokens.extend(self.encode(match))
+                total_len += len(match)
+            buffer = buffer[total_len:]
+
+            buffer = buffer + protected_suffix
+
+            for token in tokens:
+                yield token
+        
+        tokens = self.encode(buffer)
+        for token in tokens:
+            yield token
+        
 
 
 
