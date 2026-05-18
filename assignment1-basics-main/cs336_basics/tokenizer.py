@@ -4,14 +4,19 @@ from collections.abc import Iterable
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
 
-def train_bpe(input_path: str, vocab_size: int, special_tokens: list[str]):
-    vocab: dict[int,bytes] = {i : bytes([i]) for i in range(256)}
+def train_bpe(
+    input_path: str, 
+    vocab_size: int, 
+    special_tokens: list[str]
+) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
+    
+    vocab: dict[int, bytes] = {i : bytes([i]) for i in range(256)}
     current_idx = len(vocab)
     for special_token in special_tokens:
         vocab[current_idx] = special_token.encode("utf-8")
         current_idx += 1
     
-    merges: list[tuple[bytes,bytes]] = []
+    merges: list[tuple[bytes, bytes]] = []
 
     ordered_special_tokens = sorted(special_tokens, key = len, reverse = True)
     with open(input_path, "r", encoding = "utf-8") as f:
@@ -96,7 +101,12 @@ def train_bpe(input_path: str, vocab_size: int, special_tokens: list[str]):
 
 class Tokenizer:
 
-    def __init__(self, vocab: dict[int,bytes], merges: list[tuple[bytes,bytes]], special_tokens: list[str] | None = None):
+    def __init__(
+        self, 
+        vocab: dict[int, bytes], 
+        merges: list[tuple[bytes, bytes]], 
+        special_tokens: list[str] | None = None
+        ):
         self.vocab = dict(vocab)
         self.merges = list(merges)
         self.merge_rank: dict[tuple[bytes, bytes], int] = {b : rk for rk, b in enumerate(merges)}
@@ -126,12 +136,12 @@ class Tokenizer:
         tokenizer = cls(vocab, merges, special_tokens)
         return tokenizer
     
-    def decode(self, ids: list[int]):
+    def decode(self, ids: list[int]) -> str:
         final_bytes = b"".join(self.vocab[idx] for idx in ids)
         string = bytes.decode(final_bytes, "utf-8", "replace")
         return string
 
-    def encode_pretoken(self, pretoken: list[bytes]):
+    def encode_pretoken(self, pretoken: list[bytes]) -> list[int]:
         while True:
             target = None
             priority = None
@@ -164,7 +174,7 @@ class Tokenizer:
             tokens.append(self.bytes_to_id[b])
         return tokens
     
-    def encode(self, text: str):
+    def encode(self, text: str) -> list[int]:
         text_segments: list[str] = []
         ordered_special_tokens = self.ordered_special_tokens
         i = 0
@@ -206,7 +216,7 @@ class Tokenizer:
 
         return tokens
     
-    def encode_iterable(self, iterable: Iterable[str]):
+    def encode_iterable(self, iterable: Iterable[str]) -> Iterable[int]:
         buffer: str = ""
         if not len(self.ordered_special_tokens) == 0:
             max_len = len(self.ordered_special_tokens[0])
