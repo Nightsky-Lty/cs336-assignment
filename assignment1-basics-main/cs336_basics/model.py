@@ -47,7 +47,7 @@ class RMSNorm(torch.nn.Module):
     def __init__(
         self,
         d_model: int,
-        eps: float,
+        eps: float = 1e-5,
         device: torch.device=None,
         dtype: torch.dtype=None    
     ):
@@ -138,6 +138,9 @@ def scaled_dot_product_attention(
     out = einsum(dot, V, "... queries keys, ... keys d_v -> ... queries d_v")
     return out
 
+def make_causal_mask(seq_len: int, device: torch.device) -> Bool[Tensor, "seq_len seq_len"]:
+    return torch.tril(torch.ones(seq_len, seq_len, device=device, dtype=torch.bool))
+
 class MultiHeadSelfAttention(torch.nn.Module):
     def __init__(
         self,
@@ -161,10 +164,6 @@ class MultiHeadSelfAttention(torch.nn.Module):
             self.rope = RotaryPositionalEmbedding(theta, self.head_dim, max_seq_len)
         else:
             self.rope = None
-
-    def make_causal_mask(seq_len: int, device: torch.device) -> Bool[Tensor, "seq_len seq_len"]:
-        return torch.tril(torch.ones(seq_len, seq_len, device=device, dtype=torch.bool))
-
     def forward(
         self, 
         x: Float[Tensor, "... seq_len d_model"],
@@ -186,10 +185,46 @@ class MultiHeadSelfAttention(torch.nn.Module):
             Q = self.rope(Q, token_positions)
             K = self.rope(K, token_positions)
 
-        mask = self.make_causal_mask(seq_len, x.device)
+        mask = make_causal_mask(seq_len, x.device)
         out = scaled_dot_product_attention(Q, K, V, mask)
         out = rearrange(out, "... h seq_len d_v -> ... seq_len (h d_v)")
 
         return self.wo(out)
 
+class TransformerBlock(torch.nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        d_ff: int,
+        theta: float,
+        max_seq_len: int
+    ):
+        super().__init__()
+        self.ln1 = RMSNorm(d_model)
+        self.ln2 = RMSNorm(d_model)
+        self.attention = MultiHeadSelfAttention(d_model, num_heads, theta, max_seq_len)
+        self.ffn = FeedForward(d_model, d_ff)
+    
+    def forward(
+        self,
+        x: Float[Tensor, "batch seq_len d_model"]
+    ) -> Float[Tensor, "batch seq_len d_model"]:
+        x = x + self.attention(self.ln1(x))
+        x = x + self.ffn(self.ln2(x))
+        return x
+        
+class TransformerLM(torch.nn.Module):
+    def __init__(
+        self,
+        vocab_size: int,
+        context_length: int,
+        d_model: int,
+        num_layers: int,
+        num_heads: int,
+        d_ff: int,
+        rope_theta: float,
 
+    ):
+        super().__init__()
+        

@@ -151,6 +151,12 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_model"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
+    attention = model.MultiHeadSelfAttention(d_model, num_heads)
+    attention.wq.weight.data = q_proj_weight
+    attention.wk.weight.data = k_proj_weight
+    attention.wv.weight.data = v_proj_weight
+    attention.wo.weight.data = o_proj_weight
+    return attention(in_features)
     raise NotImplementedError
 
 
@@ -191,6 +197,12 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_model"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
+    attention = model.MultiHeadSelfAttention(d_model, num_heads, theta, max_seq_len)
+    attention.wq.weight.data = q_proj_weight
+    attention.wk.weight.data = k_proj_weight
+    attention.wv.weight.data = v_proj_weight
+    attention.wo.weight.data = o_proj_weight
+    return attention(in_features, token_positions)
     raise NotImplementedError
 
 
@@ -288,6 +300,18 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
+    transformer_block = model.TransformerBlock(d_model, num_heads, d_ff, theta, max_seq_len)
+    transformer_block.attention.wq.weight.data = weights['attn.q_proj.weight']
+    transformer_block.attention.wk.weight.data = weights['attn.k_proj.weight']
+    transformer_block.attention.wv.weight.data = weights['attn.v_proj.weight']
+    transformer_block.attention.wo.weight.data = weights['attn.output_proj.weight']
+    transformer_block.ln1.weight.data = weights['ln1.weight']
+    transformer_block.ln2.weight.data = weights['ln2.weight']
+    transformer_block.ffn.w1.weight.data = weights['ffn.w1.weight']
+    transformer_block.ffn.w2.weight.data = weights['ffn.w2.weight']
+    transformer_block.ffn.w3.weight.data = weights['ffn.w3.weight']
+
+    return transformer_block(in_features)
     raise NotImplementedError
 
 
