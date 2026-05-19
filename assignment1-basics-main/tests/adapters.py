@@ -9,11 +9,10 @@ import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
-from cs336_basics.utils import silu
-from cs336_basics.tokenizer import train_bpe 
-from cs336_basics.tokenizer import Tokenizer
+from cs336_basics.utils import silu, softmax
+from cs336_basics.tokenizer import train_bpe, Tokenizer
 from cs336_basics.model import Linear, Embedding, RMSNorm, FeedForward, RotaryPositionalEmbedding
-
+from cs336_basics import model
 def run_linear(
     d_in: int,
     d_out: int,
@@ -117,6 +116,7 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
+    return model.scaled_dot_product_attention(Q, K, V, mask)
     raise NotImplementedError
 
 
@@ -452,6 +452,7 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
         softmax normalizing the specified `dim`.
     """
+    return softmax(in_features, dim)
     raise NotImplementedError
 
 

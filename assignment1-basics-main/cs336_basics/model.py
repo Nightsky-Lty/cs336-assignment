@@ -1,9 +1,9 @@
 import torch
 from torch import Tensor
-from jaxtyping import Float, Int
+from jaxtyping import Float, Int, Bool
 from einops import einsum
 from einops import rearrange
-from cs336_basics.utils import silu
+from cs336_basics.utils import silu, softmax
 import math
 class Linear(torch.nn.Module):
     def __init__(
@@ -122,3 +122,72 @@ class RotaryPositionalEmbedding(torch.nn.Module):
         out_odd = x_even * sin + x_odd * cos
         out = torch.stack((out_even,out_odd),dim=-1).flatten(-2)
         return out
+
+def scaled_dot_product_attention(
+    Q: Float[Tensor, "... queries d_k"],
+    K: Float[Tensor, "... keys d_k"],
+    V: Float[Tensor, "... keys d_v"],
+    mask: Bool[Tensor, "... queries keys"] | None = None,
+) -> Float[Tensor, "... queries d_v"]:
+    dot = einsum(Q, K, "... queries d_k, ... keys d_k -> ... queries keys")
+    d_k = Q.shape[-1]
+    dot = dot / math.sqrt(d_k)
+    if mask is not None:
+        dot = dot.masked_fill(~mask, -torch.inf)
+    dot = softmax(dot, dim=-1)
+    out = einsum(dot, V, "... queries keys, ... keys d_v -> ... queries d_v")
+    return out
+
+class MultiHeadSelfAttention(torch.nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        theta: float | None = None,
+        max_seq_len: int | None = None,
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        if d_model % num_heads != 0:
+            raise ValueError("d_model must be divisible by num_heads")
+        self.head_dim = d_model // num_heads
+        self.wq = Linear(d_model, d_model)
+        self.wk = Linear(d_model, d_model)
+        self.wv = Linear(d_model, d_model)
+        self.wo = Linear(d_model, d_model)
+        
+        if theta is not None:
+            self.rope = RotaryPositionalEmbedding(theta, self.head_dim, max_seq_len)
+        else:
+            self.rope = None
+
+    def make_causal_mask(seq_len: int, device: torch.device) -> Bool[Tensor, "seq_len seq_len"]:
+        return torch.tril(torch.ones(seq_len, seq_len, device=device, dtype=torch.bool))
+
+    def forward(
+        self, 
+        x: Float[Tensor, "... seq_len d_model"],
+        token_positions: Int[Tensor, "... seq_len"] | None = None
+    ) -> Float[Tensor, "... seq_len d_model"]:
+        Q = self.wq(x)
+        K = self.wk(x)
+        V = self.wv(x)
+
+        Q = rearrange(Q, "... seq_len (h d_q) -> ... h seq_len d_q",h=self.num_heads)
+        K = rearrange(K, "... seq_len (h d_k) -> ... h seq_len d_k", h=self.num_heads)
+        V = rearrange(V, "... seq_len (h d_v) -> ... h seq_len d_v", h=self.num_heads)
+
+        if self.rope is not None:
+            if token_positions is None:
+                seq_len = x.shape[-2]
+                token_positions = torch.arange(seq_len, device=x.device)
+            Q = self.rope(Q, token_positions)
+            K = self.rope(K, token_positions)
+
+        out = scaled_dot_product_attention(Q, K, V)
+        out = rearrange(out, "... h seq_len d_v -> ... seq_len (h d_v)")
+
+        return self.wo(out)
+
+
