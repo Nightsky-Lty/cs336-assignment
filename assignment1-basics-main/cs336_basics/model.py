@@ -178,14 +178,16 @@ class MultiHeadSelfAttention(torch.nn.Module):
         K = rearrange(K, "... seq_len (h d_k) -> ... h seq_len d_k", h=self.num_heads)
         V = rearrange(V, "... seq_len (h d_v) -> ... h seq_len d_v", h=self.num_heads)
 
+        seq_len = x.shape[-2]
+
         if self.rope is not None:
             if token_positions is None:
-                seq_len = x.shape[-2]
                 token_positions = torch.arange(seq_len, device=x.device)
             Q = self.rope(Q, token_positions)
             K = self.rope(K, token_positions)
 
-        out = scaled_dot_product_attention(Q, K, V)
+        mask = self.make_causal_mask(seq_len, x.device)
+        out = scaled_dot_product_attention(Q, K, V, mask)
         out = rearrange(out, "... h seq_len d_v -> ... seq_len (h d_v)")
 
         return self.wo(out)
