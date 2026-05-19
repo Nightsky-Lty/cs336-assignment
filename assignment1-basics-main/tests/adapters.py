@@ -394,7 +394,37 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    device = in_indices.device
+    transformer_lm = model.TransformerLM(
+        vocab_size=vocab_size,
+        context_length=context_length,
+        d_model=d_model,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        rope_theta=rope_theta,
+    ).to(device)
+
+    state_dict = transformer_lm.state_dict()
+    state_dict["embedding.weight"] = weights["token_embeddings.weight"].to(device)
+    state_dict["ln_final.weight"] = weights["ln_final.weight"].to(device)
+    state_dict["lm_head.weight"] = weights["lm_head.weight"].to(device)
+
+    for layer_idx in range(num_layers):
+        src = f"layers.{layer_idx}."
+        dst = f"layers.{layer_idx}."
+        state_dict[f"{dst}ln1.weight"] = weights[f"{src}ln1.weight"].to(device)
+        state_dict[f"{dst}ln2.weight"] = weights[f"{src}ln2.weight"].to(device)
+        state_dict[f"{dst}attention.wq.weight"] = weights[f"{src}attn.q_proj.weight"].to(device)
+        state_dict[f"{dst}attention.wk.weight"] = weights[f"{src}attn.k_proj.weight"].to(device)
+        state_dict[f"{dst}attention.wv.weight"] = weights[f"{src}attn.v_proj.weight"].to(device)
+        state_dict[f"{dst}attention.wo.weight"] = weights[f"{src}attn.output_proj.weight"].to(device)
+        state_dict[f"{dst}ffn.w1.weight"] = weights[f"{src}ffn.w1.weight"].to(device)
+        state_dict[f"{dst}ffn.w2.weight"] = weights[f"{src}ffn.w2.weight"].to(device)
+        state_dict[f"{dst}ffn.w3.weight"] = weights[f"{src}ffn.w3.weight"].to(device)
+
+    transformer_lm.load_state_dict(state_dict)
+    return transformer_lm(in_indices)
 
 
 def run_rmsnorm(

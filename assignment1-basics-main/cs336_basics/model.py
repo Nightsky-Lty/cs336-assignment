@@ -227,4 +227,15 @@ class TransformerLM(torch.nn.Module):
 
     ):
         super().__init__()
-        
+        self.embedding = Embedding(vocab_size, d_model)
+        self.layers = torch.nn.ModuleList(TransformerBlock(d_model, num_heads, d_ff, rope_theta, context_length) for i in range(num_layers))
+        self.ln_final = RMSNorm(d_model)
+        self.lm_head = Linear(d_model, vocab_size)
+    
+    def forward(self, x: Int[Tensor, "batch seq_len"]) -> Float[Tensor, "batch seq_len vocab_size"]:
+        x = self.embedding(x)
+        for layer in self.layers:
+            x = layer(x)
+        x = self.ln_final(x)
+        x = self.lm_head(x)
+        return x
