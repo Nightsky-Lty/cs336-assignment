@@ -12,7 +12,7 @@ from torch import Tensor
 from cs336_basics.utils import silu, softmax
 from cs336_basics.tokenizer import train_bpe, Tokenizer
 from cs336_basics.model import Linear, Embedding, RMSNorm, FeedForward, RotaryPositionalEmbedding
-from cs336_basics import model
+from cs336_basics import model, train
 def run_linear(
     d_in: int,
     d_out: int,
@@ -525,6 +525,7 @@ def run_cross_entropy(
     Returns:
         Float[Tensor, ""]: The average cross-entropy loss across examples.
     """
+    return train.cross_entropy(inputs, targets)
     raise NotImplementedError
 
 
