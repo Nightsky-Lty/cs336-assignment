@@ -1,10 +1,14 @@
 import torch
 import math
+import os
+from typing import IO, Any, BinaryIO
 from torch import Tensor
 from jaxtyping import Float, Int
 from collections.abc import Callable, Iterable
 from typing import Optional
 from cs336_basics.utils import softmax
+import numpy.typing as npt
+import numpy as np
 
 def cross_entropy(
     logits: Float[Tensor, "... vocab_size"],
@@ -94,3 +98,35 @@ def gradient_clipping(
             if param.grad is None:
                 continue
             param.grad *= coef
+
+def data_loading(dataset: npt.NDArray, batch_size: int, context_length: int, device: str):
+    starts = np.random.randint(0, len(dataset) - context_length, batch_size)
+    inputs = np.stack([dataset[st: st + context_length] for st in starts])
+    targets = np.stack([dataset[st + 1: st + 1 + context_length] for st in starts])
+    inputs_tensor = torch.from_numpy(inputs)
+    targets_tensor = torch.from_numpy(targets)
+    inputs_tensor.to(device=device)
+    targets_tensor.to(device=device)
+    return inputs_tensor, targets_tensor
+
+def save_checkpoint(
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    iteration: int,
+    out: str | os.PathLike | BinaryIO | IO[bytes]
+):
+    params: dict = {}
+    params["model"] = model.state_dict()
+    params["optimizer"] = optimizer.state_dict()
+    params["iteration"] = iteration
+    torch.save(params, out)
+
+def load_checkpoint(
+    src: str | os.PathLike | BinaryIO | IO[bytes],
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer
+) -> int:
+    params = torch.load(src)
+    model.load_state_dict(params["model"])
+    optimizer.load_state_dict(params["optimizer"])
+    return params["iteration"]
