@@ -75,3 +75,22 @@ def learning_rate_schedule(
         return amin
     else:
         return amin + 0.5 * (1 + math.cos((t - Tw) / (Tc - Tw) * math.pi)) * (amax - amin)
+
+def gradient_clipping(
+    parameters: Iterable[torch.nn.Parameter],
+    max_l2_norm: float,
+    eps: float = 1e-6
+) -> None:
+    g = 0.0
+    params = list(parameters)
+    for param in params:
+        if param.grad is None:
+            continue
+        g += (param.grad ** 2).sum()
+    g = torch.sqrt(g)
+    if g > max_l2_norm:
+        coef = max_l2_norm / (g + eps)
+        for param in params:
+            if param.grad is None:
+                continue
+            param.grad *= coef
