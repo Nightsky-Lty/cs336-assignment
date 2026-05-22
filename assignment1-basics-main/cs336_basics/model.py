@@ -224,7 +224,6 @@ class TransformerLM(torch.nn.Module):
         num_heads: int,
         d_ff: int,
         rope_theta: float,
-
     ):
         super().__init__()
         self.embedding = Embedding(vocab_size, d_model)
