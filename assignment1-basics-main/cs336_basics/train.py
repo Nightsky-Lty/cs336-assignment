@@ -139,22 +139,27 @@ def load_checkpoint(
 def evaluate(
     model: torch.nn.Module,
     dataset: npt.NDArray,
+    num_batches: int,
     batch_size: int,
     context_length: int,
     device: str
 ):
     model.eval()
-    with torch.no_grad():
-        data, target = data_loading(dataset, batch_size, context_length, device)
-        logits = model(data)
-        loss = cross_entropy(logits, target)
+    total_loss = 0
+    for _ in range(num_batches):
+        with torch.no_grad():
+            data, target = data_loading(dataset, batch_size, context_length, device)
+            logits = model(data)
+            loss = cross_entropy(logits, target)
+            total_loss += loss
     model.train()
-    return loss
+    return 1.0 * total_loss / num_batches
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_path", type=str, required=True)
+    parser.add_argument("--eval_data_path", type=str, default=None)
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--seed", type=int, default=42)
 
@@ -181,6 +186,8 @@ def main():
 
     parser.add_argument("--log_interval", type=int, default=10)
     parser.add_argument("--save_interval", type=int, default=1000)
+    parser.add_argument("--eval_interval", type=int, default=1000)
+    parser.add_argument("--eval_num_batches", type=int, default=10)
     parser.add_argument("--checkpoint_path", type=str, default="checkpoint/checkpoint.pt")
     parser.add_argument("--resume_from", type=str, default=None)
 
@@ -190,6 +197,7 @@ def main():
     torch.manual_seed(args.seed)
 
     dataset = np.memmap(args.data_path, dtype=np.uint16, mode="r")
+    eval_dataset = np.memmap(args.eval_data_path, dtype=np.uint16, mode="r") if args.eval_data_path is not None else None
     
     model = TransformerLM(
         vocab_size=args.vocab_size,
@@ -256,7 +264,7 @@ def main():
                 f"tokens={tokens_processed}"
             )
         
-        if step % args.save_interval == 0:
+        if step % args.save_interval == 0 or step == args.max_iters:
             checkpoint_dir = os.path.dirname(args.checkpoint_path)
             if checkpoint_dir:
                 os.makedirs(checkpoint_dir, exist_ok=True)
@@ -266,6 +274,17 @@ def main():
                 iteration=step,
                 out=args.checkpoint_path
             )
+        
+        if eval_dataset is not None and step % args.eval_interval == 0:
+            loss = evaluate(
+                model=model, 
+                dataset=eval_dataset, 
+                num_batches=args.eval_num_batches,
+                batch_size=args.batch_size,
+                context_length=args.context_length,
+                device=args.device 
+            )
+            print(f"eval_loss:{loss.item():.4f}")
 
 if __name__ == "__main__":
     main()
