@@ -11,6 +11,7 @@ import numpy.typing as npt
 import numpy as np
 import argparse
 import time
+import json
 
 def cross_entropy(
     logits: Float[Tensor, "... vocab_size"],
@@ -155,6 +156,9 @@ def evaluate(
     model.train()
     return 1.0 * total_loss / num_batches
 
+def write_jsonl(jsonl_file, record):
+    jsonl_file.write(json.dumps(record, ensure_ascii=False) + "\n")
+    jsonl_file.flush()
 
 def main():
     parser = argparse.ArgumentParser()
@@ -190,8 +194,12 @@ def main():
     parser.add_argument("--eval_num_batches", type=int, default=10)
     parser.add_argument("--checkpoint_path", type=str, default="checkpoint/checkpoint.pt")
     parser.add_argument("--resume_from", type=str, default=None)
+    parser.add_argument("--log_path",type=str, default="logs/train_log.jsonl")
 
     args = parser.parse_args()
+
+    log_dir = os.path.dirname(args.log_path)
+    os.makedirs(log_dir, exist_ok=True)
 
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -263,6 +271,15 @@ def main():
                 f"time={(time.time() - start_time):.2f}s, "
                 f"tokens={tokens_processed}"
             )
+            with open(args.log_path, "a") as log_file:
+                record = {
+                    "type": "train",
+                    "step": step,
+                    "loss": loss.item(),
+                    "lr": lr,
+                    "tokens": tokens_processed
+                }
+                write_jsonl(log_file, record)
         
         if step % args.save_interval == 0 or step == args.max_iters:
             checkpoint_dir = os.path.dirname(args.checkpoint_path)
@@ -276,7 +293,7 @@ def main():
             )
         
         if eval_dataset is not None and step % args.eval_interval == 0:
-            loss = evaluate(
+            eval_loss = evaluate(
                 model=model, 
                 dataset=eval_dataset, 
                 num_batches=args.eval_num_batches,
@@ -284,7 +301,14 @@ def main():
                 context_length=args.context_length,
                 device=args.device 
             )
-            print(f"eval_loss:{loss.item():.4f}")
+            print(f"eval_loss:{eval_loss.item():.4f}")
+            record = {
+                "type": "eval",
+                "eval_loss": eval_loss.item(),
+                "step": step
+            }
+            with open(args.log_path, "a") as log_file:
+                write_jsonl(log_file, record)
 
 if __name__ == "__main__":
     main()

@@ -258,12 +258,3 @@ class Tokenizer:
             buffer = buffer + protected_suffix
 
         yield from self.encode(buffer)
-        
-
-
-
-
-
-
-
-    
