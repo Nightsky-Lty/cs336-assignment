@@ -1,8 +1,20 @@
 import regex as re
 import pickle
+import multiprocessing as mp
+from collections import Counter
 from collections.abc import Iterable
-PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+import math
 
+PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+PAT_RE = re.compile(PAT)
+
+def count_chunks(chunks: list[str]) -> Counter[bytes]:
+    counts = Counter()
+    for chunk in chunks:
+        for match in PAT_RE.finditer(chunk):
+            m = match.group(0).encode("utf-8")
+            counts[m] += 1
+    return counts
 
 def train_bpe(
     input_path: str, 
@@ -43,30 +55,33 @@ def train_bpe(
     if not(current_str == ""):
         text_segments.append(current_str)
 
-    pretoken_counts: dict[bytes, int] = {}
-    for text_segment in text_segments:
-        for match in re.finditer(PAT, text_segment):
-            m = match.group(0).encode("utf-8")
-            if m in pretoken_counts:
-                pretoken_counts[m] += 1
-            else:
-                pretoken_counts[m] = 1
+    pretoken_counts: Counter[bytes] = Counter()
     
+    # for text_segment in text_segments:
+    #     for match in PAT_RE.finditer(text_segment):
+    #         m = match.group(0).encode("utf-8")
+    #         pretoken_counts[m] += 1
+    
+    num_workers = 4
+    batch_size = math.ceil(len(text_segments) / num_workers)
+    batches = [text_segments[i: i + batch_size] for i in range(0, len(text_segments), batch_size)]
+    with mp.get_context("spawn").Pool(processes=num_workers) as pool:
+        partial_counts = pool.map(count_chunks, batches)
+    for c in partial_counts:
+        pretoken_counts.update(c)
+
     pretoken_token_sequences: dict[bytes,list[bytes]] = {}
     for pretoken_bytes in pretoken_counts:
         pretoken_token_sequences[pretoken_bytes] = [bytes([b]) for b in pretoken_bytes]
 
     while current_idx < vocab_size:
-        pair_counts: dict[tuple[bytes, bytes], int] = {}
+        pair_counts: Counter[tuple[bytes, bytes]] = Counter()
         for pretoken_bytes in pretoken_token_sequences:
             i = 0
             token_seq = pretoken_token_sequences[pretoken_bytes]
             while i + 1 < len(token_seq):
                 pair = (token_seq[i], token_seq[i + 1])
-                if pair in pair_counts:
-                    pair_counts[pair] += pretoken_counts[pretoken_bytes]
-                else:
-                    pair_counts[pair] = pretoken_counts[pretoken_bytes]
+                pair_counts[pair] += pretoken_counts[pretoken_bytes]
                 i += 1
         max_counts = None
         max_pair = None
@@ -207,7 +222,7 @@ class Tokenizer:
             if is_special_token:
                 pretokens.append([text_segment.encode("utf-8")])
             else:
-                for match in re.finditer(PAT, text_segment):
+                for match in PAT_RE.finditer(text_segment):
                     m = match.group(0).encode("utf-8")
                     pretokens.append([bytes([b]) for b in m])
 
@@ -250,7 +265,7 @@ class Tokenizer:
                 buffer = buffer[st:]
 
             total_len = 0
-            matchs = re.findall(PAT, buffer)
+            matchs = PAT_RE.findall(buffer)
             matchs = matchs[:-1]
             for match in matchs:
                 yield from self.encode(match)
