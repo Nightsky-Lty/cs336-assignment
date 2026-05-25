@@ -24,6 +24,7 @@ def train_bpe(
     text_segments: list[str] = []
     i = 0
     current_str = ""
+
     while i < len(text):
         is_special_token = False
 

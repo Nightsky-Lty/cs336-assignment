@@ -18,11 +18,6 @@ CS336 is intentionally implementation-heavy. Students are expected to write subs
 * Help students understand approaches or algorithms at a high level and nudge them in the right direction.
 * Suggest sanity checks, toy examples, assertions, and profiler-based investigations through active dialog with the student.
 
-## What AI Agents SHOULD NOT Do
-
-* Implement core assignment components for students, such as tokenizers, transformer blocks, optimizers, training loops, Triton kernels, distributed training logic, scaling-law pipelines, data filtering/deduplication pipelines, or alignment/RL methods.
-* Point students to third-party implementations. The course materials are intended to be self-contained.
-
 ## Teaching Approach
 
 When a student asks for help:

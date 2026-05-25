@@ -199,7 +199,12 @@ def main():
     args = parser.parse_args()
 
     log_dir = os.path.dirname(args.log_path)
-    os.makedirs(log_dir, exist_ok=True)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+
+    checkpoint_dir = os.path.dirname(args.checkpoint_path)
+    if checkpoint_dir:
+        os.makedirs(checkpoint_dir, exist_ok=True)
 
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -282,9 +287,6 @@ def main():
                 write_jsonl(log_file, record)
         
         if step % args.save_interval == 0 or step == args.max_iters:
-            checkpoint_dir = os.path.dirname(args.checkpoint_path)
-            if checkpoint_dir:
-                os.makedirs(checkpoint_dir, exist_ok=True)
             save_checkpoint(
                 model=model,
                 optimizer=optimizer,
