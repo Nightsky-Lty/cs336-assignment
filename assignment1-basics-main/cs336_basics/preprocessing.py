@@ -67,7 +67,7 @@ def main():
     else:
         raise ValueError("Invalid mode")
 
-    print(f"use time:{time.time() - strat_time:.2f}")
+    print(f"use time:{time.time() - strat_time:.2f}s")
 
 if __name__ == "__main__":
     main()
