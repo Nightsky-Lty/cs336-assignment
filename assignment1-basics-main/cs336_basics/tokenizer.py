@@ -16,6 +16,15 @@ def count_chunks(chunks: list[str]) -> Counter[bytes]:
             counts[m] += 1
     return counts
 
+class Item:
+    def __init__(self, counts: int, pair: tuple[bytes, bytes]):
+        self.counts = counts
+        self.pair = pair
+    
+    def __lt__(self, other):
+        return self.counts > other.counts if self.counts != other.counts else self.pair > other.pair
+
+
 def train_bpe(
     input_path: str, 
     vocab_size: int, 
@@ -74,44 +83,58 @@ def train_bpe(
     for pretoken_bytes in pretoken_counts:
         pretoken_token_sequences[pretoken_bytes] = [bytes([b]) for b in pretoken_bytes]
 
+    pair_counts: Counter[tuple[bytes, bytes]] = Counter()
+    for pretoken in pretoken_token_sequences:
+        i = 0
+        token_seq = pretoken_token_sequences[pretoken]
+        while i + 1 < len(token_seq):
+            pair = (token_seq[i], token_seq[i + 1])
+            pair_counts[pair] += pretoken_counts[pretoken]
+            i += 1
+    
     while current_idx < vocab_size:
-        pair_counts: Counter[tuple[bytes, bytes]] = Counter()
-        for pretoken_bytes in pretoken_token_sequences:
-            i = 0
-            token_seq = pretoken_token_sequences[pretoken_bytes]
-            while i + 1 < len(token_seq):
-                pair = (token_seq[i], token_seq[i + 1])
-                pair_counts[pair] += pretoken_counts[pretoken_bytes]
-                i += 1
         max_counts = None
         max_pair = None
-        for pair in pair_counts:
-            counts = pair_counts[pair]
-            if max_pair is None or counts > max_counts or (max_counts == counts and max_pair < pair):
-                max_pair = pair
-                max_counts = counts
-        if max_pair == None:
-            break
-        merges.append(max_pair)
-        merged_bytes = max_pair[0] + max_pair[1]
-        vocab[current_idx] = merged_bytes
-        current_idx += 1
-        for pretoken_bytes in pretoken_token_sequences:
-            i = 0
-            new_seq = []
-            token_seq = pretoken_token_sequences[pretoken_bytes]
-            while i < len(token_seq):
-                if i + 1 == len(token_seq):
-                    new_seq.append(token_seq[i])
-                    break
-                pair = (token_seq[i], token_seq[i + 1])
-                if pair == max_pair:
-                    new_seq.append(merged_bytes)
-                    i += 2
-                else:
-                    new_seq.append(token_seq[i])
-                    i += 1
-            pretoken_token_sequences[pretoken_bytes] = new_seq
+        for pair in 
+
+    # while current_idx < vocab_size:
+    #     pair_counts: Counter[tuple[bytes, bytes]] = Counter()
+    #     for pretoken_bytes in pretoken_token_sequences:
+    #         i = 0
+    #         token_seq = pretoken_token_sequences[pretoken_bytes]
+    #         while i + 1 < len(token_seq):
+    #             pair = (token_seq[i], token_seq[i + 1])
+    #             pair_counts[pair] += pretoken_counts[pretoken_bytes]
+    #             i += 1
+    #     max_counts = None
+    #     max_pair = None
+    #     for pair in pair_counts:
+    #         counts = pair_counts[pair]
+    #         if max_pair is None or counts > max_counts or (max_counts == counts and max_pair < pair):
+    #             max_pair = pair
+    #             max_counts = counts
+    #     if max_pair == None:
+    #         break
+    #     merges.append(max_pair)
+    #     merged_bytes = max_pair[0] + max_pair[1]
+    #     vocab[current_idx] = merged_bytes
+    #     current_idx += 1
+    #     for pretoken_bytes in pretoken_token_sequences:
+    #         i = 0
+    #         new_seq = []
+    #         token_seq = pretoken_token_sequences[pretoken_bytes]
+    #         while i < len(token_seq):
+    #             if i + 1 == len(token_seq):
+    #                 new_seq.append(token_seq[i])
+    #                 break
+    #             pair = (token_seq[i], token_seq[i + 1])
+    #             if pair == max_pair:
+    #                 new_seq.append(merged_bytes)
+    #                 i += 2
+    #             else:
+    #                 new_seq.append(token_seq[i])
+    #                 i += 1
+    #         pretoken_token_sequences[pretoken_bytes] = new_seq
 
     return vocab, merges
 
