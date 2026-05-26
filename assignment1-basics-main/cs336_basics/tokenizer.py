@@ -1,9 +1,9 @@
 import regex as re
 import pickle
 import multiprocessing as mp
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Iterable
-import math
+import math, heapq
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 PAT_RE = re.compile(PAT)
@@ -71,7 +71,7 @@ def train_bpe(
     #         m = match.group(0).encode("utf-8")
     #         pretoken_counts[m] += 1
     
-    num_workers = 4
+    num_workers = 6
     batch_size = math.ceil(len(text_segments) / num_workers)
     batches = [text_segments[i: i + batch_size] for i in range(0, len(text_segments), batch_size)]
     with mp.get_context("spawn").Pool(processes=num_workers) as pool:
@@ -83,59 +83,74 @@ def train_bpe(
     for pretoken_bytes in pretoken_counts:
         pretoken_token_sequences[pretoken_bytes] = [bytes([b]) for b in pretoken_bytes]
 
+    idx_to_pretoken: dict[int, bytes] = {i : b for i, b in enumerate(pretoken_token_sequences)}
+    pair_to_pretoken: dict[tuple[bytes, bytes], set[int]] = defaultdict(set)
+
     pair_counts: Counter[tuple[bytes, bytes]] = Counter()
-    for pretoken in pretoken_token_sequences:
+    for idx, pretoken in enumerate(pretoken_token_sequences):
         i = 0
         token_seq = pretoken_token_sequences[pretoken]
         while i + 1 < len(token_seq):
             pair = (token_seq[i], token_seq[i + 1])
             pair_counts[pair] += pretoken_counts[pretoken]
             i += 1
+            pair_to_pretoken[pair].add(idx)
     
-    while current_idx < vocab_size:
-        max_counts = None
-        max_pair = None
-        for pair in 
+    heap: list[Item] = []
+    
+    for pair in pair_counts:
+        heapq.heappush(heap, Item(pair_counts[pair], pair))
+    
+    while current_idx < vocab_size and len(heap) > 0:
+        max_count, max_pair = heap[0].counts, heap[0].pair
+        while pair_counts[max_pair] != max_count and len(heap) > 0:
+            max_count, max_pair = heap[0].counts, heap[0].pair
+            heapq.heappop(heap)
+        if pair_counts[max_pair] != max_count:
+            break
+        merges.append(max_pair)
+        merged_bytes = max_pair[0] + max_pair[1]
+        vocab[current_idx] = merged_bytes
+        current_idx += 1
 
-    # while current_idx < vocab_size:
-    #     pair_counts: Counter[tuple[bytes, bytes]] = Counter()
-    #     for pretoken_bytes in pretoken_token_sequences:
-    #         i = 0
-    #         token_seq = pretoken_token_sequences[pretoken_bytes]
-    #         while i + 1 < len(token_seq):
-    #             pair = (token_seq[i], token_seq[i + 1])
-    #             pair_counts[pair] += pretoken_counts[pretoken_bytes]
-    #             i += 1
-    #     max_counts = None
-    #     max_pair = None
-    #     for pair in pair_counts:
-    #         counts = pair_counts[pair]
-    #         if max_pair is None or counts > max_counts or (max_counts == counts and max_pair < pair):
-    #             max_pair = pair
-    #             max_counts = counts
-    #     if max_pair == None:
-    #         break
-    #     merges.append(max_pair)
-    #     merged_bytes = max_pair[0] + max_pair[1]
-    #     vocab[current_idx] = merged_bytes
-    #     current_idx += 1
-    #     for pretoken_bytes in pretoken_token_sequences:
-    #         i = 0
-    #         new_seq = []
-    #         token_seq = pretoken_token_sequences[pretoken_bytes]
-    #         while i < len(token_seq):
-    #             if i + 1 == len(token_seq):
-    #                 new_seq.append(token_seq[i])
-    #                 break
-    #             pair = (token_seq[i], token_seq[i + 1])
-    #             if pair == max_pair:
-    #                 new_seq.append(merged_bytes)
-    #                 i += 2
-    #             else:
-    #                 new_seq.append(token_seq[i])
-    #                 i += 1
-    #         pretoken_token_sequences[pretoken_bytes] = new_seq
+        modified_pairs: set[tuple[bytes,bytes]] = set()
+        pretoken_idxs = set(pair_to_pretoken[max_pair])
 
+        for pretoken_idx in pretoken_idxs:
+            pretoken = idx_to_pretoken[pretoken_idx]
+            token_seq = pretoken_token_sequences[pretoken]
+            new_seq = []
+            i = 0
+            while i + 1 < len(token_seq):
+                pair = (token_seq[i], token_seq[i + 1])
+                if pair != max_pair:
+                    pair_to_pretoken[pair].discard(pretoken_idx)
+                    pair_counts[pair] -= pretoken_counts[pretoken]
+                    modified_pairs.add(pair)
+                i += 1
+            i = 0
+            while i < len(token_seq):
+                if i + 1 < len(token_seq) and token_seq[i] + token_seq[i + 1] == merged_bytes:
+                    new_seq.append(merged_bytes)
+                    i += 2
+                else:
+                    new_seq.append(token_seq[i])
+                    i += 1
+            pretoken_token_sequences[pretoken] = new_seq
+            i = 0
+            while i + 1 < len(new_seq):
+                pair = (new_seq[i], new_seq[i + 1])
+                if pair != max_pair:
+                    pair_to_pretoken[pair].add(pretoken_idx)
+                    pair_counts[pair] += pretoken_counts[pretoken]
+                    modified_pairs.add(pair)
+                i += 1
+
+        del pair_counts[max_pair]
+        del pair_to_pretoken[max_pair]
+        for modified_pair in modified_pairs:
+            heapq.heappush(heap, Item(pair_counts[modified_pair], modified_pair))
+        
     return vocab, merges
 
 class Tokenizer:

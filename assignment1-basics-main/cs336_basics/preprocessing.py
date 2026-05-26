@@ -1,6 +1,7 @@
 from cs336_basics import tokenizer
 import pickle, argparse
 import numpy as np
+import time
 
 def train_tokenizer(
     vocab_path: str,
@@ -31,6 +32,7 @@ def encode_txt(
     tokens_arr.tofile(out_path)
 
 def main():
+    strat_time = time.time()
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", type=str, required=True)
     parser.add_argument("--txt_path", type=str, default=None)
@@ -64,6 +66,8 @@ def main():
         )
     else:
         raise ValueError("Invalid mode")
+
+    print(f"use time:{time.time() - strat_time:.2f}")
 
 if __name__ == "__main__":
     main()
