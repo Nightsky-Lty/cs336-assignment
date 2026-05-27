@@ -165,7 +165,7 @@ class Tokenizer:
                     current_idx += 1
         
         self.special_pat = re.compile("|".join(map(re.escape, self.ordered_special_tokens))) if self.ordered_special_tokens != [] else re.compile(r"(?!)")
-
+        self.pretoken_encode_result: dict[bytes, list[int]] = {special_token.encode("utf-8") : [self.bytes_to_id[special_token.encode("utf-8")]] for special_token in self.special_tokens}
     
     @classmethod
     def from_files(cls, vocab_filepath: str, merges_filepath: str, special_tokens: list[str] | None = None):
@@ -181,13 +181,16 @@ class Tokenizer:
         string = bytes.decode(final_bytes, "utf-8", "replace")
         return string
 
-    def encode_pretoken(self, pretoken: list[bytes]) -> list[int]:
+    def encode_pretoken(self, pretoken: bytes) -> list[int]:
+        if self.pretoken_encode_result.get(pretoken) is not None:
+            return self.pretoken_encode_result[pretoken]
+        pretoken_list: list[bytes] = [bytes([b]) for b in pretoken]
         while True:
             target = None
             priority = None
             i = 0
-            while i + 1 < len(pretoken):
-                merged_bytes = (pretoken[i],pretoken[i + 1])
+            while i + 1 < len(pretoken_list):
+                merged_bytes = (pretoken_list[i],pretoken_list[i + 1])
                 if merged_bytes in self.merge_rank:
                     if priority is None:
                         priority = self.merge_rank[merged_bytes]
@@ -200,18 +203,19 @@ class Tokenizer:
                 break
             i = 0
             new_seq: list[bytes] = []
-            while i < len(pretoken):
-                if i + 1 < len(pretoken) and target == (pretoken[i], pretoken[i + 1]):
-                    new_seq.append(pretoken[i] + pretoken[i + 1])
+            while i < len(pretoken_list):
+                if i + 1 < len(pretoken_list) and target == (pretoken_list[i], pretoken_list[i + 1]):
+                    new_seq.append(pretoken_list[i] + pretoken_list[i + 1])
                     i += 2
                 else:
-                    new_seq.append(pretoken[i])
+                    new_seq.append(pretoken_list[i])
                     i += 1
-            pretoken = new_seq
+            pretoken_list = new_seq
         
         tokens: list[int] = []
-        for b in pretoken:
+        for b in pretoken_list:
             tokens.append(self.bytes_to_id[b])
+        self.pretoken_encode_result[pretoken] = tokens
         return tokens
     
     def encode(self, text: str) -> list[int]:
@@ -227,20 +231,33 @@ class Tokenizer:
         if prev < len(text):
             text_segments.append((text[prev:],False))
         
-        pretokens: list[list[bytes]] = []
+        pretokens: list[bytes] = []
         for text_segment, is_special_token in text_segments:
             if is_special_token:
-                pretokens.append([text_segment.encode("utf-8")])
+                pretokens.append(text_segment.encode("utf-8"))
             else:
                 for match in PAT_RE.finditer(text_segment):
                     m = match.group(0).encode("utf-8")
-                    pretokens.append([bytes([b]) for b in m])
+                    pretokens.append(m)
 
         tokens: list[int] = []
         for pretoken in pretokens:
             tokens.extend(self.encode_pretoken(pretoken))
 
         return tokens
+    
+    def encode_without_special(self, text: str) -> list[int]:
+        pretokens: list[bytes] = []
+        for match in PAT_RE.finditer(text):
+            m = match.group(0).encode("utf-8")
+            pretokens.append(m)
+
+        tokens: list[int] = []
+        for pretoken in pretokens:
+            tokens.extend(self.encode_pretoken(pretoken))
+        return tokens
+            
+
     
     def encode_iterable(self, iterable: Iterable[str]) -> Iterable[int]:
         buffer: str = ""
@@ -264,7 +281,7 @@ class Tokenizer:
                 prev = 0
                 for match in self.special_pat.finditer(buffer):
                     if prev < match.start():
-                        yield from self.encode(buffer[prev: match.start()])
+                        yield from self.encode_without_special(buffer[prev: match.start()])
                     yield self.bytes_to_id[match.group(0).encode("utf-8")]
                     prev = match.end()
                 buffer = buffer[prev:]
@@ -273,9 +290,9 @@ class Tokenizer:
             matchs = PAT_RE.findall(buffer)
             matchs = matchs[:-1]
             for match in matchs:
-                yield from self.encode(match)
+                yield from self.encode_without_special(match)
                 total_len += len(match)
             buffer = buffer[total_len:]
             buffer = buffer + protected_suffix
 
-        yield from self.encode(buffer)
+        yield from self.encode_without_special(buffer)
