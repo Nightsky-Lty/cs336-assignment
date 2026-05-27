@@ -25,6 +25,7 @@ def encode_txt(
     special_tokens: list[str],
     out_path: str
 ):
+    print("start encoding....")
     tk = tokenizer.Tokenizer.from_files(vocab_path, merges_path, special_tokens)
     with open(txt_path, "r", encoding="utf-8") as f:
         tokens = tk.encode_iterable(f)

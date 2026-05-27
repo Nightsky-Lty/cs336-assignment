@@ -3,7 +3,7 @@ import pickle
 import multiprocessing as mp
 from collections import Counter, defaultdict
 from collections.abc import Iterable
-import math, heapq
+import math, heapq, time
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 PAT_RE = re.compile(PAT)
@@ -42,6 +42,8 @@ def train_bpe(
     with open(input_path, "r", encoding = "utf-8") as f:
         text = f.read()
 
+    pretoken_start_time = time.time()
+
     special_token_pat = re.compile("|".join(map(re.escape, ordered_special_tokens)))
     text_segments: list[str] = [p for p in special_token_pat.split(text) if p]
 
@@ -61,6 +63,9 @@ def train_bpe(
 
     idx_to_pretoken: dict[int, bytes] = {i : b for i, b in enumerate(pretoken_token_sequences)}
     pair_to_pretoken: dict[tuple[bytes, bytes], set[int]] = defaultdict(set)
+
+    print(f"pretoken use time: {time.time() - pretoken_start_time:.2f}s")
+    merges_start_time = time.time()
 
     pair_counts: Counter[tuple[bytes, bytes]] = Counter()
     for idx, pretoken in enumerate(pretoken_token_sequences):
@@ -126,7 +131,9 @@ def train_bpe(
         del pair_to_pretoken[max_pair]
         for modified_pair in modified_pairs:
             heapq.heappush(heap, Item(pair_counts[modified_pair], modified_pair))
-        
+    
+    print(f"merges use time: {time.time() - merges_start_time:.2f}s")
+
     return vocab, merges
 
 class Tokenizer:
