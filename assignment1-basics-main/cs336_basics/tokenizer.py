@@ -156,6 +156,9 @@ class Tokenizer:
                     self.bytes_to_id[token_bytes] = current_idx
                     self.vocab[current_idx] = token_bytes
                     current_idx += 1
+        
+        self.special_pat = re.compile("|".join(map(re.escape, self.ordered_special_tokens))) if self.ordered_special_tokens != [] else re.compile(r"(?!)")
+
     
     @classmethod
     def from_files(cls, vocab_filepath: str, merges_filepath: str, special_tokens: list[str] | None = None):
@@ -205,34 +208,20 @@ class Tokenizer:
         return tokens
     
     def encode(self, text: str) -> list[int]:
-        text_segments: list[str] = []
-        ordered_special_tokens = self.ordered_special_tokens
-        i = 0
-        current_str = ""
-        while i < len(text):
-            is_special_token = False
-            for special_token in ordered_special_tokens:
-                if text.startswith(special_token, i):
-                    is_special_token = True
-                    if not (current_str == ""):
-                        text_segments.append(current_str)
-                    current_str = ""
-                    text_segments.append(special_token)
-                    i += len(special_token)
-                    break
-            if not is_special_token:
-                current_str += text[i]
-                i += 1
-        if not (current_str == ""):
-            text_segments.append(current_str)
+        text_segments: list[tuple[str, bool]] = []
+        prev = 0
+        for match in self.special_pat.finditer(text):
+            normal_part = text[prev: match.start()]
+            special_part = text[match.start(): match.end()]
+            prev = match.end()
+            if normal_part != "":
+                text_segments.append((normal_part,False))
+            text_segments.append((special_part,True))
+        if prev < len(text):
+            text_segments.append((text[prev:],False))
         
         pretokens: list[list[bytes]] = []
-        for text_segment in text_segments:
-            is_special_token = False
-            for special_token in ordered_special_tokens:
-                if text_segment == special_token:
-                    is_special_token = True
-                    break
+        for text_segment, is_special_token in text_segments:
             if is_special_token:
                 pretokens.append([text_segment.encode("utf-8")])
             else:
