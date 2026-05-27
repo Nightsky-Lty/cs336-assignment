@@ -1,0 +1,60 @@
+Wed May 27 11:30:33 2026    prof_train.out
+
+         4411454936 function calls (4411451401 primitive calls) in 570.339 seconds
+
+   Ordered by: internal time
+   List reduced from 1876 to 50 due to restriction <50>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1  338.166  338.166  569.840  569.840 /Users/polaris/CS/cs336-assignment/assignment1-basics-main/cs336_basics/tokenizer.py:28(train_bpe)
+2194237626  106.905    0.000  106.905    0.000 {method 'startswith' of 'str' objects}
+2203589735/2203589570   78.581    0.000   78.581    0.000 {built-in method builtins.len}
+    52/50   37.215    0.716   80.744    1.615 {built-in method posix.read}
+        2    2.455    1.227    4.262    2.131 {method 'read' of '_io.TextIOWrapper' objects}
+       41    2.063    0.050    2.063    0.050 {built-in method posix.write}
+        2    1.807    0.903    1.807    0.903 {built-in method _codecs.utf_8_decode}
+       29    0.910    0.031    0.910    0.031 {method 'dump' of '_pickle.Pickler' objects}
+        1    0.428    0.428  570.275  570.275 cs336_basics/preprocessing.py:6(train_tokenizer)
+        7    0.302    0.043    0.302    0.043 {built-in method _posixsubprocess.fork_exec}
+  3618833    0.245    0.000    0.245    0.000 {method 'add' of 'set' objects}
+  4092779    0.242    0.000    0.242    0.000 {method 'append' of 'list' objects}
+       42    0.224    0.005    0.224    0.005 {method 'poll' of 'select.poll' objects}
+   175617    0.192    0.000    0.340    0.000 {built-in method _heapq.heappop}
+  3596805    0.173    0.000    0.173    0.000 /Users/polaris/CS/cs336-assignment/assignment1-basics-main/cs336_basics/tokenizer.py:24(__lt__)
+  1079620    0.112    0.000    0.112    0.000 {method 'discard' of 'set' objects}
+      174    0.049    0.000    0.055    0.000 <frozen importlib._bootstrap_external>:779(_compile_bytecode)
+   310568    0.045    0.000    0.070    0.000 {built-in method _heapq.heappush}
+       12    0.039    0.003    3.035    0.253 /Users/polaris/miniconda3/lib/python3.13/multiprocessing/connection.py:203(send)
+       17    0.024    0.001    0.933    0.055 /Users/polaris/miniconda3/lib/python3.13/multiprocessing/reduction.py:48(dumps)
+        8    0.015    0.002    0.016    0.002 {built-in method _pickle.loads}
+       14    0.015    0.001    0.026    0.002 /Users/polaris/miniconda3/lib/python3.13/collections/__init__.py:673(update)
+       27    0.013    0.000    0.013    0.000 {built-in method _imp.create_dynamic}
+   171303    0.010    0.000    0.010    0.000 {method 'get' of 'dict' objects}
+      174    0.010    0.000    0.010    0.000 {built-in method _io.open_code}
+   310568    0.010    0.000    0.010    0.000 /Users/polaris/CS/cs336-assignment/assignment1-basics-main/cs336_basics/tokenizer.py:20(__init__)
+      174    0.007    0.000    0.007    0.000 {built-in method marshal.loads}
+      150    0.007    0.000    0.007    0.000 {built-in method posix.waitpid}
+      916    0.005    0.000    0.005    0.000 {built-in method posix.stat}
+       11    0.005    0.000    0.005    0.000 {built-in method _io.open}
+    94529    0.003    0.000    0.003    0.000 /Users/polaris/miniconda3/lib/python3.13/collections/__init__.py:613(__missing__)
+      174    0.002    0.000    0.002    0.000 {method 'read' of '_io.BufferedReader' objects}
+  493/489    0.002    0.000    0.005    0.000 {built-in method builtins.__build_class__}
+     9743    0.002    0.000    0.002    0.000 /Users/polaris/miniconda3/lib/python3.13/collections/__init__.py:741(__delitem__)
+      373    0.002    0.000    0.004    0.000 /Users/polaris/miniconda3/lib/python3.13/inspect.py:895(cleandoc)
+        2    0.001    0.001    0.001    0.001 {built-in method _pickle.dump}
+    27/26    0.001    0.000    0.002    0.000 {built-in method _imp.exec_dynamic}
+       19    0.001    0.000    0.001    0.000 {built-in method builtins.eval}
+      375    0.001    0.000    0.001    0.000 {method 'update' of 'dict' objects}
+      430    0.001    0.000    0.008    0.000 <frozen importlib._bootstrap_external>:1621(find_spec)
+    19434    0.001    0.000    0.001    0.000 {built-in method builtins.isinstance}
+        1    0.001    0.001    0.003    0.003 /Users/polaris/CS/cs336-assignment/assignment1-basics-main/.venv/lib/python3.13/site-packages/regex/_regex_core.py:1(<module>)
+      184    0.001    0.000    0.001    0.000 {method '__exit__' of '_io._IOBase' objects}
+     9969    0.001    0.000    0.001    0.000 {built-in method builtins.getattr}
+     2237    0.001    0.000    0.001    0.000 <frozen importlib._bootstrap_external>:131(_path_join)
+        1    0.001    0.001  570.277  570.277 cs336_basics/preprocessing.py:34(main)
+        6    0.001    0.000    0.241    0.040 /Users/polaris/miniconda3/lib/python3.13/multiprocessing/popen_spawn_posix.py:38(_launch)
+      208    0.001    0.000    0.002    0.000 /Users/polaris/miniconda3/lib/python3.13/typing.py:260(_collect_type_parameters)
+      218    0.001    0.000    0.010    0.000 <frozen importlib._bootstrap>:1240(_find_spec)
+       26    0.001    0.000    0.001    0.000 {built-in method posix.listdir}
+
+

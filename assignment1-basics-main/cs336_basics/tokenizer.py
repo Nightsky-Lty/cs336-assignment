@@ -24,7 +24,6 @@ class Item:
     def __lt__(self, other):
         return self.counts > other.counts if self.counts != other.counts else self.pair > other.pair
 
-
 def train_bpe(
     input_path: str, 
     vocab_size: int, 
@@ -42,35 +41,12 @@ def train_bpe(
     ordered_special_tokens = sorted(special_tokens, key = len, reverse = True)
     with open(input_path, "r", encoding = "utf-8") as f:
         text = f.read()
-    text_segments: list[str] = []
-    i = 0
-    current_str = ""
 
-    while i < len(text):
-        is_special_token = False
-
-        for special_token in ordered_special_tokens:
-            if text.startswith(special_token, i):
-                if not (current_str == ""):
-                    text_segments.append(current_str)
-                current_str = ""
-                i += len(special_token)
-                is_special_token = True
-                break
-
-        if not is_special_token:
-            current_str += text[i]
-            i += 1
-    if not(current_str == ""):
-        text_segments.append(current_str)
+    special_token_pat = re.compile("|".join(map(re.escape, ordered_special_tokens)))
+    text_segments: list[str] = [p for p in special_token_pat.split(text) if p]
 
     pretoken_counts: Counter[bytes] = Counter()
-    
-    # for text_segment in text_segments:
-    #     for match in PAT_RE.finditer(text_segment):
-    #         m = match.group(0).encode("utf-8")
-    #         pretoken_counts[m] += 1
-    
+        
     num_workers = 6
     batch_size = math.ceil(len(text_segments) / num_workers)
     batches = [text_segments[i: i + batch_size] for i in range(0, len(text_segments), batch_size)]
