@@ -254,18 +254,13 @@ class Tokenizer:
                     break
             
             if len(self.ordered_special_tokens) > 0:
-                i = 0
-                st = 0
-                while i < len(buffer):
-                    for special_token in self.ordered_special_tokens:
-                        if buffer.startswith(special_token, i):
-                            yield from self.encode(buffer[st: i])
-                            yield self.bytes_to_id[special_token.encode("utf-8")]
-                            st = i + len(special_token)
-                            i = i + len(special_token) - 1
-                            break
-                    i += 1
-                buffer = buffer[st:]
+                prev = 0
+                for match in self.special_pat.finditer(buffer):
+                    if prev < match.start():
+                        yield from self.encode(buffer[prev: match.start()])
+                    yield self.bytes_to_id[match.group(0).encode("utf-8")]
+                    prev = match.end()
+                buffer = buffer[prev:]
 
             total_len = 0
             matchs = PAT_RE.findall(buffer)
