@@ -12,6 +12,7 @@ import numpy as np
 import argparse
 import time
 import json
+import wandb
 
 def cross_entropy(
     logits: Float[Tensor, "... vocab_size"],
@@ -195,6 +196,14 @@ def main():
     parser.add_argument("--checkpoint_path", type=str, default="checkpoint/checkpoint.pt")
     parser.add_argument("--resume_from", type=str, default=None)
     parser.add_argument("--log_path",type=str, default="logs/train_log.jsonl")
+    parser.add_argument("--wandb_project", type=str, default="cs336-assignment1")
+    parser.add_argument("--wandb_run_name", type=str, default=None)
+    parser.add_argument(
+        "--wandb_mode",
+        type=str,
+        choices=["online", "offline", "disabled"],
+        default="online",
+    )
 
     args = parser.parse_args()
 
@@ -208,6 +217,13 @@ def main():
 
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
+
+    wandb.init(
+        project=args.wandb_project,
+        name=args.wandb_run_name,
+        mode=args.wandb_mode,
+        config=vars(args),
+    )
 
     dataset = np.memmap(args.data_path, dtype=np.uint16, mode="r")
     eval_dataset = np.memmap(args.eval_data_path, dtype=np.uint16, mode="r") if args.eval_data_path is not None else None
@@ -269,11 +285,12 @@ def main():
 
         if step % args.log_interval == 0:
             tokens_processed = step * args.batch_size * args.context_length
+            elapsed_time = time.time() - start_time
             print(
                 f"step={step}, "
                 f"loss={loss.item():.4f}, "
                 f"lr={lr:.6e}, "
-                f"time={(time.time() - start_time):.2f}s, "
+                f"time={elapsed_time:.2f}s, "
                 f"tokens={tokens_processed}"
             )
             with open(args.log_path, "a") as log_file:
@@ -282,9 +299,19 @@ def main():
                     "step": step,
                     "loss": loss.item(),
                     "lr": lr,
-                    "tokens": tokens_processed
+                    "tokens": tokens_processed,
+                    "elapsed_time": elapsed_time,
                 }
                 write_jsonl(log_file, record)
+            wandb.log(
+                {
+                    "train/loss": loss.item(),
+                    "train/lr": lr,
+                    "train/tokens": tokens_processed,
+                    "train/elapsed_time": elapsed_time,
+                },
+                step=step,
+            )
         
         if step % args.save_interval == 0 or step == args.max_iters:
             save_checkpoint(
@@ -307,10 +334,20 @@ def main():
             record = {
                 "type": "eval",
                 "eval_loss": eval_loss.item(),
-                "step": step
+                "step": step,
+                "elapsed_time": time.time() - start_time,
             }
             with open(args.log_path, "a") as log_file:
                 write_jsonl(log_file, record)
+            wandb.log(
+                {
+                    "eval/loss": eval_loss.item(),
+                    "eval/elapsed_time": record["elapsed_time"],
+                },
+                step=step,
+            )
+
+    wandb.finish()
 
 if __name__ == "__main__":
     main()

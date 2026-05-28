@@ -1,0 +1,6 @@
+wandb/
+checkpoint/
+logs/
+prof_train.out
+prof_train.txt
+prof_train_tottime.txt
