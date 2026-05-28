@@ -131,9 +131,10 @@ def save_checkpoint(
 def load_checkpoint(
     src: str | os.PathLike | BinaryIO | IO[bytes],
     model: torch.nn.Module,
-    optimizer: torch.optim.Optimizer
+    optimizer: torch.optim.Optimizer,
+    device: str
 ) -> int:
-    params = torch.load(src)
+    params = torch.load(src, map_location=device)
     model.load_state_dict(params["model"])
     optimizer.load_state_dict(params["optimizer"])
     return params["iteration"]
@@ -250,7 +251,8 @@ def main():
         start_it = load_checkpoint(
             src=args.resume_from, 
             model=model, 
-            optimizer=optimizer
+            optimizer=optimizer,
+            device=args.device
         )
 
     model.train()
