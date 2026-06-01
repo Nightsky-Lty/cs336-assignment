@@ -1,5 +1,5 @@
 import argparse
-import cs336_basics.model, cs336_basics.optimizer
+import cs336_basics.model, cs336_basics.optimizer, cs336_basics.nn_utils
 import torch
 from torch import Tensor
 import numpy as np
@@ -75,8 +75,9 @@ def measure_forward(
     measure_steps: int
 ):
     for _ in range(warmup_steps):
-        out = model(inputs)
-        torch.cuda.synchronize()
+        with torch.no_grad():
+            out = model(inputs)
+            torch.cuda.synchronize()
     elapsed_times = []
     for _ in range(measure_steps):
         with torch.no_grad():
@@ -89,9 +90,59 @@ def measure_forward(
     print_result(elapsed_times)
 
 def measure_forward_backward(
-    model=
+    model: torch.nn.Module,
+    inputs: Tensor,
+    targets: Tensor,
+    warmup_steps: int,
+    measure_steps: int
 ):
+    for _ in range(warmup_steps):
+        model.zero_grad()
+        out = model(inputs)
+        loss = cs336_basics.nn_utils.cross_entropy(out, targets)
+        loss.backward()
+        torch.cuda.synchronize()
+    elapsed_times = []
+    for _ in range(measure_steps):
+        torch.cuda.synchronize()
+        start_time = default_timer()
+        model.zero_grad()
+        out = model(inputs)
+        loss = cs336_basics.nn_utils.cross_entropy(out, targets)
+        loss.backward()
+        torch.cuda.synchronize()
+        end_time = default_timer()
+        elapsed_times.append(end_time - start_time)
+    print_result(elapsed_times)
 
+def measure_train_step(
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    inputs: Tensor,
+    targets: Tensor,
+    warmup_steps: int,
+    measure_steps: int
+):
+    for _ in range(warmup_steps):
+        optimizer.zero_grad()
+        out = model(inputs)
+        loss = cs336_basics.nn_utils.cross_entropy(out, targets)
+        loss.backward()
+        optimizer.step()
+        torch.cuda.synchronize()
+    elapsed_times = []
+    for _ in range(measure_steps):
+        torch.cuda.synchronize()
+        start_time = default_timer()
+        optimizer.zero_grad()
+        out = model(inputs)
+        loss = cs336_basics.nn_utils.cross_entropy(out, targets)
+        loss.backward()
+        optimizer.step()
+        torch.cuda.synchronize()
+        end_time = default_timer()
+        elapsed_times.append(end_time - start_time)
+    print_result(elapsed_times)
 
 def main():
     args = parse_args()
@@ -110,7 +161,7 @@ def main():
     optimizer = cs336_basics.optimizer.AdamW(
         model.parameters(),
         lr = args.lr
-    ).to(args.device)
+    )
     inputs = torch.randint(
         low=0,
         high=args.vocab_size,
@@ -128,12 +179,25 @@ def main():
             model=model,
             inputs=inputs,
             warmup_steps=args.warmup_steps,
-            measure_steps=args.measure_steaps
+            measure_steps=args.measure_steps
         )
     elif args.mode == "forward_backward":
-        measure_forward_backward(inputs, targets)
+        measure_forward_backward(
+            model=model,
+            inputs=inputs,
+            targets=targets,
+            warmup_steps=args.warmup_steps,
+            measure_steps=args.measure_steps,
+        )
     elif args.mode == "train_step":
-        measure_train_step(inputs, targets)
+        measure_train_step(
+            model=model,
+            optimizer=optimizer,
+            inputs=inputs,
+            targets=targets,
+            warmup_steps=args.warmup_steps,
+            measure_steps=args.measure_steps,
+        )
     else:
         raise ValueError("Invalid mode")
 
