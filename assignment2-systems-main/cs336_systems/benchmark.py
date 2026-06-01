@@ -1,8 +1,9 @@
 import argparse
-import cs336_basics.model
+import cs336_basics.model, cs336_basics.optimizer
 import torch
+from torch import Tensor
 import numpy as np
-
+from timeit import default_timer
 
 MODEL_SIZES = {
     "small": {"d_model": 768, "d_ff": 3072, "num_layers": 12, "num_heads": 12},
@@ -58,6 +59,39 @@ def parse_args():
 
     return args
 
+def print_result(times: list[float]):
+    if len(times) == 0:
+        return
+    mean_time = np.mean(times)
+    std_time = np.std(times)
+    print(f"mean_time_s: {mean_time:.6f}")
+    print(f"std_time_s: {std_time:.6f}")
+    print(f"times_s: {[round(t, 6) for t in times]}")
+
+def measure_forward(
+    model: torch.nn.Module,
+    inputs: Tensor,
+    warmup_steps: int,
+    measure_steps: int
+):
+    for _ in range(warmup_steps):
+        out = model(inputs)
+        torch.cuda.synchronize()
+    elapsed_times = []
+    for _ in range(measure_steps):
+        with torch.no_grad():
+            torch.cuda.synchronize()
+            start_time = default_timer()
+            out = model(inputs)
+            torch.cuda.synchronize()
+            end_time = default_timer()
+            elapsed_times.append(end_time - start_time)
+    print_result(elapsed_times)
+
+def measure_forward_backward(
+    model=
+):
+
 
 def main():
     args = parse_args()
@@ -67,12 +101,41 @@ def main():
         torch.cuda.manual_seed_all(args.seed)
     model = cs336_basics.model.BasicsTransformerLM(
         vocab_size=args.vocab_size,
-        context_length=args.context_length,
+        context_length=args.seq_len,
         d_model=args.d_model,
         num_layers=args.num_layers,
         num_heads=args.num_heads,
         d_ff=args.d_ff,
+    ).to(args.device)
+    optimizer = cs336_basics.optimizer.AdamW(
+        model.parameters(),
+        lr = args.lr
+    ).to(args.device)
+    inputs = torch.randint(
+        low=0,
+        high=args.vocab_size,
+        size=(args.batch_size, args.seq_len),
+        device=args.device
     )
+    targets = torch.randint(
+        low=0,
+        high=args.vocab_size,
+        size=(args.batch_size, args.seq_len),
+        device=args.device
+    )
+    if args.mode == "forward":
+        measure_forward(
+            model=model,
+            inputs=inputs,
+            warmup_steps=args.warmup_steps,
+            measure_steps=args.measure_steaps
+        )
+    elif args.mode == "forward_backward":
+        measure_forward_backward(inputs, targets)
+    elif args.mode == "train_step":
+        measure_train_step(inputs, targets)
+    else:
+        raise ValueError("Invalid mode")
 
 if __name__ == "__main__":
     main()
