@@ -165,3 +165,7 @@ data/
 .DS_Store
 .vscode/
 assignment1-basics-main/checkpoint/
+*.nsys-rep
+*.qdrep
+*.qdstrm
+nsys-report*
