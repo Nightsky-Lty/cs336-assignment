@@ -1,6 +1,7 @@
 import argparse
 import cs336_basics.model, cs336_basics.optimizer, cs336_basics.nn_utils
 import torch
+from contextlib import nullcontext
 from torch import Tensor
 import numpy as np
 from timeit import default_timer
@@ -41,7 +42,7 @@ def parse_args():
     parser.add_argument("--measure_steps", type=int, default=10)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--mix_dtype", type=bool, default=False)
+    parser.add_argument("--use_mixed_precision", action="store_true")
 
     args = parser.parse_args()
 
@@ -69,28 +70,33 @@ def print_result(times: list[float]):
     print(f"std_time_s: {std_time:.6f}")
     print(f"times_s: {[round(t, 6) for t in times]}")
 
+def get_ctx(use_mixed_precision: bool):
+    return torch.autocast(device_type="cuda", dtype=torch.bfloat16) if use_mixed_precision else nullcontext()
+
 def measure_forward(
     model: torch.nn.Module,
     inputs: Tensor,
     warmup_steps: int,
     measure_steps: int,
-    mix_dtype: bool,
+    use_mixed_precision: bool
 ):
-    dtype = torch.bfloat16 if mix_dtype else torch.float32
-    with torch.autocast(device_type="cuda", dtype=dtype):
-        for _ in range(warmup_steps):
-            with torch.no_grad():
+    for _ in range(warmup_steps):
+        with torch.no_grad():
+            ctx = get_ctx(use_mixed_precision)
+            with ctx:
                 out = model(inputs)
-                torch.cuda.synchronize()
-        elapsed_times = []
-        for _ in range(measure_steps):
-            with torch.no_grad():
-                torch.cuda.synchronize()
-                start_time = default_timer()
+            torch.cuda.synchronize()
+    elapsed_times = []
+    for _ in range(measure_steps):
+        with torch.no_grad():
+            torch.cuda.synchronize()
+            start_time = default_timer()
+            ctx = get_ctx(use_mixed_precision)
+            with ctx:
                 out = model(inputs)
-                torch.cuda.synchronize()
-                end_time = default_timer()
-                elapsed_times.append(end_time - start_time)
+            torch.cuda.synchronize()
+            end_time = default_timer()
+            elapsed_times.append(end_time - start_time)
     print_result(elapsed_times)
 
 def measure_forward_backward(
@@ -99,27 +105,29 @@ def measure_forward_backward(
     targets: Tensor,
     warmup_steps: int,
     measure_steps: int,
-    mix_dtype: bool,
+    use_mixed_precision: bool
 ):
-    dtype = torch.bfloat16 if mix_dtype else torch.float32
-    with torch.autocast(device_type="cuda", dtype=dtype):
-        for _ in range(warmup_steps):
-            model.zero_grad()
+    for _ in range(warmup_steps):
+        model.zero_grad()
+        ctx = get_ctx(use_mixed_precision)
+        with ctx:
             out = model(inputs)
             loss = cs336_basics.nn_utils.cross_entropy(out, targets)
-            loss.backward()
-            torch.cuda.synchronize()
-        elapsed_times = []
-        for _ in range(measure_steps):
-            torch.cuda.synchronize()
-            start_time = default_timer()
-            model.zero_grad()
+        loss.backward()
+        torch.cuda.synchronize()
+    elapsed_times = []
+    for _ in range(measure_steps):
+        torch.cuda.synchronize()
+        start_time = default_timer()
+        model.zero_grad()
+        ctx = get_ctx(use_mixed_precision)
+        with ctx:
             out = model(inputs)
             loss = cs336_basics.nn_utils.cross_entropy(out, targets)
-            loss.backward()
-            torch.cuda.synchronize()
-            end_time = default_timer()
-            elapsed_times.append(end_time - start_time)
+        loss.backward()
+        torch.cuda.synchronize()
+        end_time = default_timer()
+        elapsed_times.append(end_time - start_time)
     print_result(elapsed_times)
 
 def measure_train_step(
@@ -129,29 +137,31 @@ def measure_train_step(
     targets: Tensor,
     warmup_steps: int,
     measure_steps: int,
-    mix_dtype: bool
+    use_mixed_precision: bool
 ):
-    dtype = torch.bfloat16 if mix_dtype else torch.float32
-    with torch.autocast(device_type="cuda", dtype=dtype):
-        for _ in range(warmup_steps):
-            optimizer.zero_grad()
+    for _ in range(warmup_steps):
+        optimizer.zero_grad()
+        ctx = get_ctx(use_mixed_precision)
+        with ctx:
             out = model(inputs)
             loss = cs336_basics.nn_utils.cross_entropy(out, targets)
-            loss.backward()
-            optimizer.step()
-            torch.cuda.synchronize()
-        elapsed_times = []
-        for _ in range(measure_steps):
-            torch.cuda.synchronize()
-            start_time = default_timer()
-            optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        torch.cuda.synchronize()
+    elapsed_times = []
+    for _ in range(measure_steps):
+        torch.cuda.synchronize()
+        start_time = default_timer()
+        optimizer.zero_grad()
+        ctx = get_ctx(use_mixed_precision)
+        with ctx:
             out = model(inputs)
             loss = cs336_basics.nn_utils.cross_entropy(out, targets)
-            loss.backward()
-            optimizer.step()
-            torch.cuda.synchronize()
-            end_time = default_timer()
-            elapsed_times.append(end_time - start_time)
+        loss.backward()
+        optimizer.step()
+        torch.cuda.synchronize()
+        end_time = default_timer()
+        elapsed_times.append(end_time - start_time)
     print_result(elapsed_times)
 
 def main():
@@ -189,7 +199,8 @@ def main():
             model=model,
             inputs=inputs,
             warmup_steps=args.warmup_steps,
-            measure_steps=args.measure_steps
+            measure_steps=args.measure_steps,
+            use_mixed_precision=args.use_mixed_precision
         )
     elif args.mode == "forward_backward":
         measure_forward_backward(
@@ -198,6 +209,7 @@ def main():
             targets=targets,
             warmup_steps=args.warmup_steps,
             measure_steps=args.measure_steps,
+            use_mixed_precision=args.use_mixed_precision
         )
     elif args.mode == "train_step":
         measure_train_step(
@@ -207,6 +219,7 @@ def main():
             targets=targets,
             warmup_steps=args.warmup_steps,
             measure_steps=args.measure_steps,
+            use_mixed_precision=args.use_mixed_precision
         )
     else:
         raise ValueError("Invalid mode")
