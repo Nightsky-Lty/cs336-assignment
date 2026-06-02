@@ -41,6 +41,7 @@ def parse_args():
     parser.add_argument("--measure_steps", type=int, default=10)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--mix_dtype", type=bool, default=False)
 
     args = parser.parse_args()
 
@@ -72,21 +73,24 @@ def measure_forward(
     model: torch.nn.Module,
     inputs: Tensor,
     warmup_steps: int,
-    measure_steps: int
+    measure_steps: int,
+    mix_dtype: bool,
 ):
-    for _ in range(warmup_steps):
-        with torch.no_grad():
-            out = model(inputs)
-            torch.cuda.synchronize()
-    elapsed_times = []
-    for _ in range(measure_steps):
-        with torch.no_grad():
-            torch.cuda.synchronize()
-            start_time = default_timer()
-            out = model(inputs)
-            torch.cuda.synchronize()
-            end_time = default_timer()
-            elapsed_times.append(end_time - start_time)
+    dtype = torch.bfloat16 if mix_dtype else torch.float32
+    with torch.autocast(device_type="cuda", dtype=dtype):
+        for _ in range(warmup_steps):
+            with torch.no_grad():
+                out = model(inputs)
+                torch.cuda.synchronize()
+        elapsed_times = []
+        for _ in range(measure_steps):
+            with torch.no_grad():
+                torch.cuda.synchronize()
+                start_time = default_timer()
+                out = model(inputs)
+                torch.cuda.synchronize()
+                end_time = default_timer()
+                elapsed_times.append(end_time - start_time)
     print_result(elapsed_times)
 
 def measure_forward_backward(
@@ -94,25 +98,28 @@ def measure_forward_backward(
     inputs: Tensor,
     targets: Tensor,
     warmup_steps: int,
-    measure_steps: int
+    measure_steps: int,
+    mix_dtype: bool,
 ):
-    for _ in range(warmup_steps):
-        model.zero_grad()
-        out = model(inputs)
-        loss = cs336_basics.nn_utils.cross_entropy(out, targets)
-        loss.backward()
-        torch.cuda.synchronize()
-    elapsed_times = []
-    for _ in range(measure_steps):
-        torch.cuda.synchronize()
-        start_time = default_timer()
-        model.zero_grad()
-        out = model(inputs)
-        loss = cs336_basics.nn_utils.cross_entropy(out, targets)
-        loss.backward()
-        torch.cuda.synchronize()
-        end_time = default_timer()
-        elapsed_times.append(end_time - start_time)
+    dtype = torch.bfloat16 if mix_dtype else torch.float32
+    with torch.autocast(device_type="cuda", dtype=dtype):
+        for _ in range(warmup_steps):
+            model.zero_grad()
+            out = model(inputs)
+            loss = cs336_basics.nn_utils.cross_entropy(out, targets)
+            loss.backward()
+            torch.cuda.synchronize()
+        elapsed_times = []
+        for _ in range(measure_steps):
+            torch.cuda.synchronize()
+            start_time = default_timer()
+            model.zero_grad()
+            out = model(inputs)
+            loss = cs336_basics.nn_utils.cross_entropy(out, targets)
+            loss.backward()
+            torch.cuda.synchronize()
+            end_time = default_timer()
+            elapsed_times.append(end_time - start_time)
     print_result(elapsed_times)
 
 def measure_train_step(
@@ -121,27 +128,30 @@ def measure_train_step(
     inputs: Tensor,
     targets: Tensor,
     warmup_steps: int,
-    measure_steps: int
+    measure_steps: int,
+    mix_dtype: bool
 ):
-    for _ in range(warmup_steps):
-        optimizer.zero_grad()
-        out = model(inputs)
-        loss = cs336_basics.nn_utils.cross_entropy(out, targets)
-        loss.backward()
-        optimizer.step()
-        torch.cuda.synchronize()
-    elapsed_times = []
-    for _ in range(measure_steps):
-        torch.cuda.synchronize()
-        start_time = default_timer()
-        optimizer.zero_grad()
-        out = model(inputs)
-        loss = cs336_basics.nn_utils.cross_entropy(out, targets)
-        loss.backward()
-        optimizer.step()
-        torch.cuda.synchronize()
-        end_time = default_timer()
-        elapsed_times.append(end_time - start_time)
+    dtype = torch.bfloat16 if mix_dtype else torch.float32
+    with torch.autocast(device_type="cuda", dtype=dtype):
+        for _ in range(warmup_steps):
+            optimizer.zero_grad()
+            out = model(inputs)
+            loss = cs336_basics.nn_utils.cross_entropy(out, targets)
+            loss.backward()
+            optimizer.step()
+            torch.cuda.synchronize()
+        elapsed_times = []
+        for _ in range(measure_steps):
+            torch.cuda.synchronize()
+            start_time = default_timer()
+            optimizer.zero_grad()
+            out = model(inputs)
+            loss = cs336_basics.nn_utils.cross_entropy(out, targets)
+            loss.backward()
+            optimizer.step()
+            torch.cuda.synchronize()
+            end_time = default_timer()
+            elapsed_times.append(end_time - start_time)
     print_result(elapsed_times)
 
 def main():
