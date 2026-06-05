@@ -170,3 +170,4 @@ assignment1-basics-main/checkpoint/
 *.qdstrm
 nsys-report*
 *.sqlite
+*.pickle

@@ -2,6 +2,7 @@ import argparse
 import cs336_basics.model, cs336_basics.optimizer, cs336_basics.nn_utils
 import torch
 from contextlib import nullcontext
+from pathlib import Path
 from torch import Tensor
 import numpy as np
 from timeit import default_timer
@@ -43,6 +44,7 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--use_mixed_precision", action="store_true")
+    parser.add_argument("--use_memory_profile", action="store_true")
 
     args = parser.parse_args()
 
@@ -73,73 +75,44 @@ def print_result(times: list[float]):
 def get_ctx(use_mixed_precision: bool):
     return torch.autocast(device_type="cuda", dtype=torch.bfloat16) if use_mixed_precision else nullcontext()
 
-def measure_forward(
-    model: torch.nn.Module,
-    inputs: Tensor,
-    warmup_steps: int,
-    measure_steps: int,
-    use_mixed_precision: bool
-):
-    for _ in range(warmup_steps):
-        with torch.no_grad():
-            ctx = get_ctx(use_mixed_precision)
-            with ctx:
-                out = model(inputs)
-            torch.cuda.synchronize()
-    elapsed_times = []
-    for _ in range(measure_steps):
-        with torch.no_grad():
-            torch.cuda.synchronize()
-            start_time = default_timer()
-            ctx = get_ctx(use_mixed_precision)
-            with ctx:
-                out = model(inputs)
-            torch.cuda.synchronize()
-            end_time = default_timer()
-            elapsed_times.append(end_time - start_time)
-    print_result(elapsed_times)
 
-def measure_forward_backward(
-    model: torch.nn.Module,
-    inputs: Tensor,
-    targets: Tensor,
-    warmup_steps: int,
-    measure_steps: int,
-    use_mixed_precision: bool
-):
-    for _ in range(warmup_steps):
-        model.zero_grad()
-        ctx = get_ctx(use_mixed_precision)
-        with ctx:
-            out = model(inputs)
-            loss = cs336_basics.nn_utils.cross_entropy(out, targets)
-        loss.backward()
-        torch.cuda.synchronize()
-    elapsed_times = []
-    for _ in range(measure_steps):
-        torch.cuda.synchronize()
-        start_time = default_timer()
-        model.zero_grad()
-        ctx = get_ctx(use_mixed_precision)
-        with ctx:
-            out = model(inputs)
-            loss = cs336_basics.nn_utils.cross_entropy(out, targets)
-        loss.backward()
-        torch.cuda.synchronize()
-        end_time = default_timer()
-        elapsed_times.append(end_time - start_time)
-    print_result(elapsed_times)
+def get_unique_snapshot_path(snapshot_stem: str) -> str:
+    candidate = Path(f"{snapshot_stem}.pickle")
+    if not candidate.exists():
+        return str(candidate)
 
-def measure_train_step(
+    index = 1
+    while True:
+        candidate = Path(f"{snapshot_stem}_{index}.pickle")
+        if not candidate.exists():
+            return str(candidate)
+        index += 1
+
+
+def run_single_step(
+    mode: str,
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
     inputs: Tensor,
     targets: Tensor,
-    warmup_steps: int,
-    measure_steps: int,
-    use_mixed_precision: bool
+    use_mixed_precision: bool,
 ):
-    for _ in range(warmup_steps):
+    if mode == "forward":
+        with torch.no_grad():
+            ctx = get_ctx(use_mixed_precision)
+            with ctx:
+                return model(inputs)
+
+    if mode == "forward_backward":
+        model.zero_grad()
+        ctx = get_ctx(use_mixed_precision)
+        with ctx:
+            out = model(inputs)
+            loss = cs336_basics.nn_utils.cross_entropy(out, targets)
+        loss.backward()
+        return loss
+
+    if mode == "train_step":
         optimizer.zero_grad()
         ctx = get_ctx(use_mixed_precision)
         with ctx:
@@ -147,22 +120,55 @@ def measure_train_step(
             loss = cs336_basics.nn_utils.cross_entropy(out, targets)
         loss.backward()
         optimizer.step()
+        return loss
+
+    raise ValueError(f"Invalid mode: {mode}")
+
+def measure_mode(
+    mode: str,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer | None,
+    inputs: Tensor,
+    targets: Tensor | None,
+    warmup_steps: int,
+    measure_steps: int,
+    use_mixed_precision: bool,
+    use_memory_profile: bool,
+    snapshot_stem: str,
+):
+    for _ in range(warmup_steps):
+        run_single_step(
+            mode=mode,
+            model=model,
+            optimizer=optimizer,
+            inputs=inputs,
+            targets=targets,
+            use_mixed_precision=use_mixed_precision,
+        )
         torch.cuda.synchronize()
     elapsed_times = []
+    if use_memory_profile:
+        torch.cuda.memory._record_memory_history(max_entries=1000000)
     for _ in range(measure_steps):
         torch.cuda.synchronize()
         start_time = default_timer()
-        optimizer.zero_grad()
-        ctx = get_ctx(use_mixed_precision)
-        with ctx:
-            out = model(inputs)
-            loss = cs336_basics.nn_utils.cross_entropy(out, targets)
-        loss.backward()
-        optimizer.step()
+        run_single_step(
+            mode=mode,
+            model=model,
+            optimizer=optimizer,
+            inputs=inputs,
+            targets=targets,
+            use_mixed_precision=use_mixed_precision,
+        )
         torch.cuda.synchronize()
         end_time = default_timer()
         elapsed_times.append(end_time - start_time)
     print_result(elapsed_times)
+    if use_memory_profile:
+        snapshot_path = get_unique_snapshot_path(snapshot_stem)
+        torch.cuda.memory._dump_snapshot(snapshot_path)
+        print(f"memory_snapshot: {snapshot_path}")
+        torch.cuda.memory._record_memory_history(enabled=None)
 
 def main():
     args = parse_args()
@@ -194,35 +200,18 @@ def main():
         size=(args.batch_size, args.seq_len),
         device=args.device
     )
-    if args.mode == "forward":
-        measure_forward(
-            model=model,
-            inputs=inputs,
-            warmup_steps=args.warmup_steps,
-            measure_steps=args.measure_steps,
-            use_mixed_precision=args.use_mixed_precision
-        )
-    elif args.mode == "forward_backward":
-        measure_forward_backward(
-            model=model,
-            inputs=inputs,
-            targets=targets,
-            warmup_steps=args.warmup_steps,
-            measure_steps=args.measure_steps,
-            use_mixed_precision=args.use_mixed_precision
-        )
-    elif args.mode == "train_step":
-        measure_train_step(
-            model=model,
-            optimizer=optimizer,
-            inputs=inputs,
-            targets=targets,
-            warmup_steps=args.warmup_steps,
-            measure_steps=args.measure_steps,
-            use_mixed_precision=args.use_mixed_precision
-        )
-    else:
-        raise ValueError("Invalid mode")
+    measure_mode(
+        mode=args.mode,
+        model=model,
+        optimizer=optimizer,
+        inputs=inputs,
+        targets=targets,
+        warmup_steps=args.warmup_steps,
+        measure_steps=args.measure_steps,
+        use_mixed_precision=args.use_mixed_precision,
+        use_memory_profile=args.use_memory_profile,
+        snapshot_stem=f"memory_snapshot_{args.mode}_{args.model_size}_seq{args.seq_len}",
+    )
 
 if __name__ == "__main__":
     main()
