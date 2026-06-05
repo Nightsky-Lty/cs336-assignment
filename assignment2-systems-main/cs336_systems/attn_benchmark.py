@@ -3,6 +3,7 @@ import torch
 from torch import Tensor
 from timeit import default_timer
 import numpy as np
+import argparse
 
 def print_result(times: list[float]):
     if len(times) == 0:
@@ -13,41 +14,69 @@ def print_result(times: list[float]):
     print(f"std_time_s: {std_time:.6f}")
     print(f"times_s: {[round(t, 6) for t in times]}")
 
-def measure_attn(Q: Tensor, K: Tensor, V: Tensor, warmup_steps: int, measure_steps: int):
+def measure_attn(
+    Q: Tensor,
+    K: Tensor,
+    V: Tensor,
+    warmup_steps: int,
+    measure_steps: int,
+    use_torch_compile: bool
+):
+    if use_torch_compile:
+        attn = torch.compile(scaled_dot_product_attention)
+    else:
+        attn = scaled_dot_product_attention
     forward_times = []
-    for _ in warmup_steps:
-        out = scaled_dot_product_attention(Q, K, V)
+    for _ in range(warmup_steps):
+        out = attn(Q, K, V)
         loss = out.sum()
         torch.cuda.synchronize()
-    for _ in measure_steps:
+    for _ in range(measure_steps):
         torch.cuda.synchronize()
         start_time = default_timer()
-        out = scaled_dot_product_attention(Q, K, V)
+        out = attn(Q, K, V)
+        torch.cuda.synchronize()
         end_time = default_timer()
         forward_times.append(end_time - start_time)
-        torch.cuda.synchronize()
     print("forward result:")
     print_result(forward_times)
 
+    def grad_clear():
+        Q.grad = None
+        K.grad = None
+        V.grad = None
+
     backward_times = []
-    for _ in warmup_steps:
-        out = scaled_dot_product_attention(Q, K, V)
+    for _ in range(warmup_steps):
+        grad_clear()
+        out = attn(Q, K, V)
         loss = out.sum()
+        torch.cuda.synchronize()
         loss.backward()
         torch.cuda.synchronize()
-    for _ in measure_steps:
+    for _ in range(measure_steps):
+        torch.cuda.synchronize()
+        grad_clear()
+        out = attn(Q, K, V)
+        loss = out.sum()
         torch.cuda.synchronize()
         start_time = default_timer()
-        out = scaled_dot_product_attention(Q, K, V)
-        loss = out.sum()
         loss.backward()
+        torch.cuda.synchronize()
         end_time = default_timer()
         backward_times.append(end_time - start_time)
-        torch.cuda.synchronize()
+
     print("backward result:")
     print_result(backward_times)
 
+def parser_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--use_torch_compile", action="store_true")
+    args = parser.parse_args()
+    return args
+
 def main():
+    args = parser_args()
     batch_size = 8
     seed = 42
     warm_steps = 10
@@ -63,7 +92,7 @@ def main():
             Q = torch.randn((batch_size, seq_length, d_model), device=device, requires_grad=True)
             K = torch.randn((batch_size, seq_length, d_model), device=device, requires_grad=True)
             V = torch.randn((batch_size, seq_length, d_model), device=device, requires_grad=True)
-            measure_attn(Q, K, V, warm_steps, measure_steps)
+            measure_attn(Q, K, V, warm_steps, measure_steps, args.use_torch_compile)
             
 
 if __name__ == "__main__":
