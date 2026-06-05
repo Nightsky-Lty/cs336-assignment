@@ -29,7 +29,6 @@ def measure_attn(
     forward_times = []
     for _ in range(warmup_steps):
         out = attn(Q, K, V)
-        loss = out.sum()
         torch.cuda.synchronize()
     for _ in range(measure_steps):
         torch.cuda.synchronize()
