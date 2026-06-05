@@ -214,7 +214,7 @@ Measuring performance is subtle — some common traps can cause us to not measur
 
 • 生成一批随机数据。
 
-• Run ?? warm-up steps (before you start measuring time), then time the execution of ?? steps (either only forward, forward and backward, or forward and backward with optimizer step, depending on an argument). For timing, you can use the Python timeit module (e.g., either using the timeit function, or using timeit.default_timer(), which gives you the system’s highest resolution clock, thus a better default for benchmarking than time.time()). 
+• Run `w` warm-up steps (before you start measuring time), then time the execution of `n` steps (either only forward, forward and backward, or forward and backward with optimizer step, depending on an argument). For timing, you can use the Python `timeit` module (e.g., either using the `timeit` function, or using `timeit.default_timer()`, which gives you the system’s highest resolution clock, thus a better default for benchmarking than `time.time()`). 
 
 • 先运行若干次预热步骤，再对若干次执行做计时；根据命令行参数，计时对象可以是仅前向、前向加反向、或者前向加反向再加优化器步进。计时时，你可以使用 Python 的 `timeit` 模块（例如 `timeit` 函数本身，或者 `timeit.default_timer()`；后者会使用系统上分辨率最高的时钟，因此比 `time.time()` 更适合做基准测试）。
 
@@ -306,7 +306,11 @@ You can swap your original implementation with the annotated version in your ben
 
 cs336_basics.model.scaled_dot_product_attention = annotated_scaled_dot_product_attention 
 
+你可以在 benchmarking 脚本中用下面这行代码，把原始实现替换成带注释版本：
+
 Finally, it’s worth noting that torch.compile can make it hard to attribute time and resources to specific parts of your code. You will likely have to wrap and strip various parts of your code in torch.compile and nvtx annotations to correctly attribute time and resource usage to various parts of your source. 
+
+最后还需要注意，`torch.compile` 会让时间与资源归因变得更困难。为了正确判断源码中各部分各自消耗了多少时间和资源，你很可能需要反复对不同代码片段加上或移除 `torch.compile` 与 NVTX 标注。
 
 你可以在 benchmarking 脚本中用下面这种方式，把原始实现替换成这个带标注的版本：
 
@@ -900,11 +904,11 @@ checkpoint block 做大或做小，并不会影响“重计算总共需要做多
 
 ### 题目（gradient_checkpointing）：最优显存的梯度检查点（4 分）
 
-Consider a Transformer with ?? identical blocks stacked sequentially. Without any checkpointing, all ?? blocks’ worth of residuals are kept alive simultaneously, giving ??(??) peak activation memory. We have a free hand to wrap any subset of the forward pass in checkpoint, including nesting checkpoint calls inside one another. 
+Consider a Transformer with `n` identical blocks stacked sequentially. Without any checkpointing, all `n` blocks’ worth of residuals are kept alive simultaneously, giving `Theta(n)` peak activation memory. We have a free hand to wrap any subset of the forward pass in checkpoint, including nesting checkpoint calls inside one another. 
 
 考虑一个由 `n` 个相同 block 顺序堆叠而成的 Transformer。若不使用 checkpointing，则全部 `n` 个 block 的 residual 会同时存活，峰值激活显存为 `Θ(n)` 个 block 的量级。现在你可以自由决定对 forward 的哪些部分使用 `checkpoint`，甚至可以嵌套 checkpoint。
 
-(a) What checkpointing strategy minimizes peak activation memory, ignoring the compute cost? Describe how you would arrange the checkpoint calls (a code sketch is fine), and give the asymptotic peak activation memory and compute of your strategy as a function of ??. Assume the residuals saved by a single block dominate any per-checkpoint bookkeeping. 
+(a) What checkpointing strategy minimizes peak activation memory, ignoring the compute cost? Describe how you would arrange the checkpoint calls (a code sketch is fine), and give the asymptotic peak activation memory and compute of your strategy as a function of `n`. Assume the residuals saved by a single block dominate any per-checkpoint bookkeeping. 
 
 (a) 如果忽略计算代价，哪种 checkpoint 策略能使峰值激活显存最小？请描述你会如何放置这些 checkpoint 调用（给个代码草图即可），并给出这种策略的渐近峰值激活显存与计算代价，作为 `n` 的函数。可以假设单个 block 的 residual 占主导，而每个 checkpoint 的元数据开销可以忽略。
 
@@ -956,7 +960,7 @@ The naïve attention implementation needs to save attention score matrices of sh
 
 2. 遍历 head embedding 维度 `d_model ∈ [16, 32, 64, 128]` 与 sequence length `∈ [256, 1024, 4096, 8192, 16384]` 的笛卡尔积。
 
-(iii) Create random inputs ??, ??, ?? for the appropriate size. 
+(iii) Create random inputs `Q`, `K`, `V` for the appropriate size. 
 
 3. 为合适尺寸创建随机输入 `Q`、`K`、`V`。
 
@@ -1035,7 +1039,7 @@ To introduce what you’ll need to know about Triton and how it interoperates wi
 
 为了介绍你在 Triton 中需要掌握的内容，以及 Triton 如何与 PyTorch 协作，我们先通过一个 “weighted sum” 示例 kernel 来入门。若想进一步学习 Triton，可以查看 Triton 的官方教程。需要注意的是，这些教程没有使用我们下面会讲到的、更方便的 block pointer 抽象。
 
-Given an input matrix ??, we’ll multiply its entries by a column-wise weight vector ??, and sum each row, giving us the matrix-vector product of ?? and ??. We are going to work through the forward pass of this operation first, and then write the Triton kernel for the backward pass. 
+Given an input matrix `x`, we’ll multiply its entries by a column-wise weight vector `weight`, and sum each row, giving us the matrix-vector product of `x` and `weight`. We are going to work through the forward pass of this operation first, and then write the Triton kernel for the backward pass. 
 
 给定一个输入矩阵 `x`，我们将它的每个元素与一个按列给出的权重向量 `weight` 相乘，再对每一行求和，得到矩阵 `x` 与向量 `weight` 的矩阵向量积。我们会先推导这个操作的 forward，再实现它的 Triton backward kernel。
 
@@ -1051,11 +1055,11 @@ def weighted_sum(x, weight):
     return (weight * x).sum(axis=-1) 
 ```
 
-When writing our Triton kernel, we’ll have each program instance (potentially running in parallel) compute the weighted sum of a tile of rows of ??, and write the corresponding scalar outputs to the output tensor. In Triton, a program instance is a block of threads all running the same program, and these thread blocks can be run in parallel on the GPU. Instead of taking tensors as arguments, we take pointers to their first elements, as well as strides for each tensor that tell us how to move along axes. 
+When writing our Triton kernel, we’ll have each program instance (potentially running in parallel) compute the weighted sum of a tile of rows of `x`, and write the corresponding scalar outputs to the output tensor. In Triton, a program instance is a block of threads all running the same program, and these thread blocks can be run in parallel on the GPU. Instead of taking tensors as arguments, we take pointers to their first elements, as well as strides for each tensor that tell us how to move along axes. 
 
 在编写 Triton kernel 时，我们会让每个 program instance（可能并行运行）负责计算输入矩阵若干行 tile 的加权和，并把对应的标量输出写入结果张量。在 Triton 中，一个 program instance 可以理解为一组执行相同程序的线程块，这些线程块会在 GPU 上并行运行。与直接把张量作为参数不同，我们传入的是指向张量首元素的指针，以及每个张量的 stride，用来描述如何沿各维移动。
 
-We can use the strides to load a tensor corresponding to the tile of rows of ?? that we’re summing in the running instance, using the program ID to divide up the work (i.e., instance ?? will process the ??-th tile of rows of ??). The main difference between the forward pass in Triton and PyTorch in this simple case is the need to do pointer arithmetic and explicit loads/stores. We will use the block pointer abstraction with tl.make_block_ptr to greatly simplify the pointer arithmetic, although this means we need to do some setup to prepare the block pointers. 
+We can use the strides to load a tensor corresponding to the tile of rows of `x` that we’re summing in the running instance, using the program ID to divide up the work (i.e., instance `i` will process the `i`-th tile of rows of `x`). The main difference between the forward pass in Triton and PyTorch in this simple case is the need to do pointer arithmetic and explicit loads/stores. We will use the block pointer abstraction with `tl.make_block_ptr` to greatly simplify the pointer arithmetic, although this means we need to do some setup to prepare the block pointers. 
 
 我们可以利用这些 stride，根据 program ID 来装载当前实例负责处理的那块行 tile。也就是说，第 `i` 个 instance 会处理输入矩阵的第 `i` 块行。在这个简单例子中，Triton forward 与 PyTorch forward 最大的区别，是你必须自己做指针运算，并显式地 `load/store` 数据。为了大幅简化这些指针运算，我们会使用 `tl.make_block_ptr` 提供的 block pointer 抽象，不过这也意味着我们需要先做一些准备工作来定义这些 block pointer。
 
@@ -1210,7 +1214,7 @@ Since we are defining our own kernel, we will also need to write our own backwar
 
 既然我们是在自己定义 kernel，那么 backward 也需要自己实现。
 
-In the forward pass, we were given the inputs to our layer, and needed to compute its outputs. In the backward pass, recall that we will be given the gradients of the objective with respect to our outputs, and need to compute the gradient with respect to each of our inputs. In our case, our operation has as inputs a matrix $\boldsymbol { x } : \mathbb { R } ^ { n \times h }$ and a weight vector $w : \mathbb { R } ^ { h }$ . For brevity, let’s call our operation $f ( x , w )$ , whose range is ℝ??. Then, assuming we are given $\nabla _ { f ( x , w ) } \mathcal { L } .$ , the gradient of the loss ℒ︀ with respect to the output of our layer, we can apply the multivariate chain rule to obtain the following expressions for the gradients with respect to ?? and ??: 
+In the forward pass, we were given the inputs to our layer, and needed to compute its outputs. In the backward pass, recall that we will be given the gradients of the objective with respect to our outputs, and need to compute the gradient with respect to each of our inputs. In our case, our operation has as inputs a matrix $\boldsymbol { x } : \mathbb { R } ^ { n \times h }$ and a weight vector $w : \mathbb { R } ^ { h }$ . For brevity, let’s call our operation $f ( x , w )$ , whose range is $\mathbb { R } ^ { n }$ . Then, assuming we are given $\nabla _ { f ( x , w ) } \mathcal { L }$ , the gradient of the loss $\mathcal { L }$ with respect to the output of our layer, we can apply the multivariate chain rule to obtain the following expressions for the gradients with respect to $x$ and $w$: 
 
 在 forward 中，我们已知层的输入，并需要计算输出。到了 backward，回忆一下：我们会拿到目标函数对输出的梯度，然后需要进一步计算它对每个输入的梯度。在这个例子里，我们的操作输入是一个矩阵 $\boldsymbol{x} : \mathbb{R}^{n \times h}$ 和一个权重向量 $w : \mathbb{R}^{h}$。为简洁起见，把这个操作记作 $f(x, w)$。假设我们已知损失函数对输出的梯度 $\nabla_{f(x,w)} \mathcal{L}$，那么就可以利用多元链式法则，推出对 $x$ 和 $w$ 的梯度表达式如下：
 
@@ -1222,7 +1226,7 @@ $$
 \left(\nabla_ {w} \mathcal {L}\right) _ {j} = \sum_ {i = 1} ^ {n} \frac {\partial f (x , w) _ {i}}{\partial w _ {j}} \left(\nabla_ {f (x, w)} \mathcal {L}\right) _ {i} = \sum_ {i = 1} ^ {n} x _ {i j} \cdot \left(\nabla_ {f (x, w)} \mathcal {L}\right) _ {i} \tag {3}
 $$
 
-This gives a simple formula for computing the backward pass. To obtain the backward step with respect to ??, we apply Equation 2 and take the outer product of ?? and $\nabla _ { f ( x , w ) }$ . To compute the backward step with respect to ?? $( \mathrm { i . e . } \ ( \nabla _ { w } \mathcal { L } ) _ { j } )$ , we must multiply our input gradient by the corresponding output row. 
+This gives a simple formula for computing the backward pass. To obtain the backward step with respect to $x$, we apply Equation 2 and take the outer product of $w$ and $\nabla _ { f ( x , w ) }$ . To compute the backward step with respect to $w$ $( \mathrm { i . e . } \ ( \nabla _ { w } \mathcal { L } ) _ { j } )$ , we must multiply our input gradient by the corresponding output row. 
 
 这样我们就得到了一个相对直接的 backward 计算公式。对于 $x$ 的梯度，可以依据式 (2)，把相应量与 $\nabla_{f(x,w)}$ 做外积；对于 $w$ 的梯度，也就是 $(\nabla_w \mathcal{L})_j$，则需要把输入与对应输出行的梯度相乘并求和。
 
@@ -1312,7 +1316,7 @@ for i in range(tl.cdiv(D, D_TILE_SIZE)):
 
 ```
 
-Computing the gradient $\nabla _ { x }$ is simple, and we write the result to the appropriate tile of the output tensor. However, computing $\nabla _ { w }$ is a bit more challenging. Each kernel instance is responsible for one row tile of $x ,$ but we now need to sum across rows of ??. Instead of doing this sum directly in our backward pass, we will assume that partial_grad_weight_ptr contains an n_row_tiles × ?? matrix, where the first dimension is only reduced within a row tile from ??. We reduce within the current row tile before writing to this tensor. Outside of the kernel, we reduce $\nabla _ { w }$ using torch.sum to sum up the results from each row tile.1 
+Computing the gradient $\nabla _ { x }$ is simple, and we write the result to the appropriate tile of the output tensor. However, computing $\nabla _ { w }$ is a bit more challenging. Each kernel instance is responsible for one row tile of $x$, but we now need to sum across rows of $x$. Instead of doing this sum directly in our backward pass, we will assume that `partial_grad_weight_ptr` contains an `n_row_tiles x D` matrix, where the first dimension is only reduced within a row tile from $x$. We reduce within the current row tile before writing to this tensor. Outside of the kernel, we reduce $\nabla _ { w }$ using `torch.sum` to sum up the results from each row tile.1 
 
 计算 $\nabla_x$ 相对简单，我们直接把结果写入输出张量对应的 tile 即可。但计算 $\nabla_w$ 稍微麻烦一些。每个 kernel instance 只负责输入矩阵的一块行 tile，可是这里我们需要沿所有行进行求和。因此，我们不直接在 backward kernel 中完成这个全局求和，而是假定 `partial_grad_weight_ptr` 保存了一个 `n_row_tiles × D` 的矩阵，其中第一维只在各自的行 tile 内部完成归约。每个 instance 先把自己那部分行 tile 的局部和写到这个矩阵中，随后在 kernel 外部再使用 `torch.sum` 把这些局部结果加总起来，得到最终的 $\nabla_w$。
 
@@ -1365,7 +1369,7 @@ f_weightedsum = WeightedSumFunc.apply
 
 ```
 
-Now, calling f_weightedsum on two PyTorch tensors ?? and ?? will give a tensor such as the following: 
+Now, calling `f_weightedsum` on two PyTorch tensors `x` and `weight` will give a tensor such as the following: 
 
 现在，如果你对两个 PyTorch 张量调用 `f_weightedsum`，会得到类似下面这样的结果：
 
@@ -1435,7 +1439,7 @@ $$
 \boldsymbol {d} \boldsymbol {K} = \boldsymbol {d} \boldsymbol {S} ^ {\top} \boldsymbol {Q} / \sqrt {d} \tag {11}
 $$
 
-As we can see, the backward pass depends on some very large activations from the forward pass. For example, computing ???? in Equation 7 requires ?? , which are the attention scores of shape (batch_size, n_heads, seq_len, seq_len)—the size of this activation matrix depends quadratically on the sequence length, explaining the memory issues we encountered above when benchmarking attention at large sequence lengths. During both the forward and backward pass of vanilla attention, we pay significant memory IO costs to transfer ?? and other large activations between on-chip SRAM and GPU HBM. There are several such transfers made in standard implementations: for example, a standard backward pass implementation would read ?? from HBM in the computations of both Equation 7 and Equation 9. 
+As we can see, the backward pass depends on some very large activations from the forward pass. For example, computing $\boldsymbol { d } \boldsymbol { V }$ in Equation 7 requires $\boldsymbol { P }$, which are the attention scores of shape `(batch_size, n_heads, seq_len, seq_len)`; the size of this activation matrix depends quadratically on the sequence length, explaining the memory issues we encountered above when benchmarking attention at large sequence lengths. During both the forward and backward pass of vanilla attention, we pay significant memory IO costs to transfer $\boldsymbol { P }$ and other large activations between on-chip SRAM and GPU HBM. There are several such transfers made in standard implementations: for example, a standard backward pass implementation would read $\boldsymbol { P }$ from HBM in the computations of both Equation 7 and Equation 9. 
 
 从这里可以看出，backward 依赖于 forward 中一些非常大的激活。例如，式 (7) 需要依赖注意力概率矩阵，而它的形状是 `(batch_size, n_heads, seq_len, seq_len)`，大小会随 sequence length 二次增长，这也解释了你之前在大序列长度注意力基准中遇到的显存问题。无论 forward 还是 backward，朴素注意力都会为在片上 SRAM 与 GPU HBM 之间来回搬运这些大张量付出很高的 IO 代价，例如 standard backward 里会在多个地方反复读取这些中间结果。
 
@@ -1447,9 +1451,13 @@ FlashAttention 的核心目标，就是避免把注意力矩阵写入并再读�
 
 To avoid reading and writing the attention matrix to and from HBM, we compute the softmax reduction without access to the whole input. Specifically, we restructure the attention computation to split the input into tiles and make several passes over input tiles, thus incrementally performing the softmax reduction. 
 
+为了避免把注意力矩阵写入再读回 HBM，我们需要在看不到完整输入的前提下完成 softmax 归约。具体地，我们把输入切成多个 tile，并对这些 tile 做多次遍历，从而以增量方式完成 softmax 归约。
+
 # Recomputation
 
-We avoid storing the large intermediate attention matrices of shape (batch_size, n_heads, seq_len, seq_len) in HBM. Instead, we will save certain “activation checkpoints” in HBM and then recompute part of the forward pass during the backward pass, to get the other activations we need for computing gradients. FlashAttention-2 also stores the logsumexp of the attention scores, ??, which will be used to simplify the backward pass computation. The expression for ?? is: 
+We avoid storing the large intermediate attention matrices of shape `(batch_size, n_heads, seq_len, seq_len)` in HBM. Instead, we will save certain “activation checkpoints” in HBM and then recompute part of the forward pass during the backward pass, to get the other activations we need for computing gradients. FlashAttention-2 also stores the logsumexp of the attention scores, $L$, which will be used to simplify the backward pass computation. The expression for $L$ is: 
+
+我们不再把形状为 `(batch_size, n_heads, seq_len, seq_len)` 的大中间注意力矩阵直接存到 HBM，而是只保存某些“激活检查点”，并在 backward 时重算一部分 forward，以恢复求梯度所需的其他激活。FlashAttention-2 还会保存注意力分数的 logsumexp，也就是 $L$，它能让 backward 的计算更简洁。
 
 $$
 L _ {i} = \log \left(\sum_ {j} \exp \left(\boldsymbol {S} _ {i j}\right)\right) \tag {12}
@@ -1457,17 +1465,23 @@ $$
 
 In our final kernel we will compute this in an online manner, but the final result should be the same. With tiling and recomputation together, our memory IO and peak usage no longer depend on sequence_length2 and therefore we may use larger sequence lengths. 
 
+在最终 kernel 中，我们会用在线方式计算这个量，但最终结果应保持一致。把 tiling 和 recomputation 结合起来之后，显存 IO 与峰值占用将不再依赖 `sequence_length^2`，因此我们就能处理更长的序列。
+
 # Operator fusion
 
 Lastly, we avoid repeated memory IO for the attention matrix and other intermediate activations by performing all our operations in a single kernel—this is referred to as operator or kernel fusion. We will write a single Triton kernel for the forward pass that performs all the operations involved in attention with limited data transfer between HBM and SRAM. Operator fusion is partly enabled by recomputation, since we can avoid the usual memory IO we would pay to store every intermediate activation to HBM. 
 
+最后，我们把原本分散的操作尽量塞进同一个 kernel 中，避免对注意力矩阵和其他中间激活反复做显存 IO；这就是所谓的 operator fusion 或 kernel fusion。我们会编写一个单独的 Triton forward kernel，在 HBM 与 SRAM 之间只做有限的数据搬运。recomputation 也为这种融合提供了帮助，因为它减少了“把每个中间激活都写回 HBM”的需要。
+
 For more intuition on these techniques, check out the FlashAttention papers [T. Dao et al., 2022; T. Dao, 2023]. 
+
+如果你想对这些技巧形成更直观的理解，可以参考 FlashAttention 的两篇论文 [T. Dao et al., 2022; T. Dao, 2023]。
 
 # Backward pass with recomputation
 
 ### 使用重计算的 backward
 
-Using ??, we can do the appropriate recomputation and compute the backward pass efficiently. Before we start the backward pass, we precompute the value $D = \operatorname { r o w s u m } ( O \circ d O )$ in global memory (where ∘ is element-wise multiplication), which is equal to rowsum $( P \circ d P )$ since $P d P ^ { \top } = P { \left( d O V ^ { \top } \right) } ^ { \top } =$ $( P V ) d O ^ { \top } = O d O ^ { \top }$ (and rowsum $( A \circ B ) = \mathrm { d i a g } ( A B ^ { \top } )$ for any matrices ?? and ??). With the ?? and ?? vectors, the backward pass can be computed without softmax. The full calculation for the backward pass is now: 
+Using $L$, we can do the appropriate recomputation and compute the backward pass efficiently. Before we start the backward pass, we precompute the value $D = \operatorname { r o w s u m } ( O \circ d O )$ in global memory (where $\circ$ is element-wise multiplication), which is equal to rowsum $( P \circ d P )$ since $P d P ^ { \top } = P { \left( d O V ^ { \top } \right) } ^ { \top } = ( P V ) d O ^ { \top } = O d O ^ { \top }$ (and rowsum $( A \circ B ) = \mathrm { d i a g } ( A B ^ { \top } )$ for any matrices $A$ and $B$). With the $L$ and $D$ vectors, the backward pass can be computed without softmax. The full calculation for the backward pass is now: 
 
 借助 `L`，我们可以在 backward 中做相应的重计算，并高效地完成梯度求解。在 backward 开始前，我们先在全局显存中预计算
 
@@ -1499,7 +1513,7 @@ $$
 \boldsymbol {d} \boldsymbol {K} = \boldsymbol {d} \boldsymbol {S} ^ {\top} \boldsymbol {Q} / \sqrt {d} \tag {19}
 $$
 
-We can see that the sequence of operations does not require us to have stored the attention scores ?? in HBM during the forward pass—we recompute them from the activations ??, ??, and ?? in Equation 13 and Equation 14. 
+We can see that the sequence of operations does not require us to have stored the attention scores $P$ in HBM during the forward pass, since we recompute them from the activations $Q$, $K$, and $L$ in Equation 13 and Equation 14. 
 
 其中 `∘` 表示逐元素乘法。这个量与 `rowsum(P ∘ dP)` 相等，因为：
 
@@ -1507,15 +1521,15 @@ We can see that the sequence of operations does not require us to have stored th
 
 ### FlashAttention forward 的细节
 
-Now that we have a high-level idea of the techniques used in FlashAttention-2, we will dive into the details of the FA2 forward pass kernel that you will implement. In order to avoid reading and writing the attention matrix to and from HBM, we wish to use tiling, i.e., computing each tile of the output independently of the others. This requires us to be able to compute tiles of ?? , ideally tiled in both dimensions (for queries and for keys). 
+Now that we have a high-level idea of the techniques used in FlashAttention-2, we will dive into the details of the FA2 forward pass kernel that you will implement. In order to avoid reading and writing the attention matrix to and from HBM, we wish to use tiling, i.e., computing each tile of the output independently of the others. This requires us to be able to compute tiles of $P$, ideally tiled in both dimensions (for queries and for keys). 
 
 既然已经有了高层思路，下面我们进一步深入到你将实现的 FA2 forward kernel 的细节。为了避免在 HBM 中读写完整注意力矩阵，我们希望使用 tiling，也就是独立地计算输出的每个 tile。这要求我们能构造 `O` 的局部 tile，理想情况下沿 query 和 key 两个维度都做 tiling。
 
-However, when we apply softmax to ??, we require entire rows of ?? to be reduced to compute the softmax denominator, meaning we cannot compute ?? in tiles directly. FlashAttention-2 solves this problem using online softmax. In the following text, we will use subscript index ?? to denote the current query tile, and superscript index (??) to denote the current key tile. The tiles along the query dimension will be of size $B _ { q }$ and those along the key dimension will be of size $B _ { k }$ . We will not tile along the hidden dimension ??. 
+However, when we apply softmax to $S$, we require entire rows of $S$ to be reduced to compute the softmax denominator, meaning we cannot compute $P$ in tiles directly. FlashAttention-2 solves this problem using online softmax. In the following text, we will use subscript index $i$ to denote the current query tile, and superscript index $(j)$ to denote the current key tile. The tiles along the query dimension will be of size $B _ { q }$ and those along the key dimension will be of size $B _ { k }$ . We will not tile along the hidden dimension $d$. 
 
 但 softmax 需要对整行做归约来计算分母，因此我们不能直接把 `P` 简单按 tile 独立算完。FlashAttention-2 通过 online softmax 解决了这个问题。后文中，下标 `i` 表示当前 query tile，上标 `(j)` 表示当前 key tile。沿 query 维度的 tile 大小为 `B_q`，沿 key 维度的 tile 大小为 `B_k`。我们不在 hidden dimension `d` 上切 tile。
 
-We also keep some row-wise running values, $m _ { i } ^ { ( j ) } \in \mathbb { R } ^ { B _ { q } }$ and $\boldsymbol { l } _ { i } ^ { ( j ) } \in \mathbb { R } ^ { B _ { q } }$ . The row-wise $m _ { i } ^ { ( j ) }$ value is a running maximum, which is tracked so we can compute softmax in a numerically stable manner (recall this trick from our softmax implementation in Assignment 1). We will update $m _ { i } ^ { ( j ) }$ with each new rowwise tile of ?? (when $j$ increases). Using the running maximum, we can compute the unnormalized softmax values (numerators) as $\tilde { P } _ { i } ^ { ( j ) } = \exp \biggl ( S _ { i j } - m _ { i } ^ { ( j ) } \biggr ) . l _ { i } ^ { ( j ) }$ is a running proxy for the softmax denominator, and will be updated using the unnormalized softmax values as $l _ { i } ^ { ( j ) } = \exp \left( m _ { i } ^ { \left( j - 1 \right) } - m _ { i } ^ { \left( j \right) } \right) \cdot l _ { i } ^ { ( j - 1 ) } +$ (??(?? ???? rowsu m $\left( \tilde { P } _ { i } ^ { ( j ) } \right)$ . When we finally write the output, we will need to finish normalizing it by using $l _ { i } ^ { ( T _ { k } ) }$ , which is the final value of $\boldsymbol { l } _ { i } ^ { ( j ) }$ after processing all key tiles. Algorithm 1 shows the forward pass on the GPU. 
+We also keep some row-wise running values, $m _ { i } ^ { ( j ) } \in \mathbb { R } ^ { B _ { q } }$ and $\boldsymbol { l } _ { i } ^ { ( j ) } \in \mathbb { R } ^ { B _ { q } }$ . The row-wise $m _ { i } ^ { ( j ) }$ value is a running maximum, which is tracked so we can compute softmax in a numerically stable manner (recall this trick from our softmax implementation in Assignment 1). We will update $m _ { i } ^ { ( j ) }$ with each new row-wise tile of $S$ (when $j$ increases). Using the running maximum, we can compute the unnormalized softmax values (numerators) as $\tilde { P } _ { i } ^ { ( j ) } = \exp \bigl( S _ { i j } - m _ { i } ^ { ( j ) } \bigr)$ . $l _ { i } ^ { ( j ) }$ is a running proxy for the softmax denominator, and will be updated using the unnormalized softmax values as $l _ { i } ^ { ( j ) } = \exp \left( m _ { i } ^ { \left( j - 1 \right) } - m _ { i } ^ { \left( j \right) } \right) \cdot l _ { i } ^ { ( j - 1 ) } + \operatorname { r o w s u m } \left( \tilde { P } _ { i } ^ { ( j ) } \right)$ . When we finally write the output, we will need to finish normalizing it by using $l _ { i } ^ { ( T _ { k } ) }$ , which is the final value of $\boldsymbol { l } _ { i } ^ { ( j ) }$ after processing all key tiles. Algorithm 1 shows the forward pass on the GPU. 
 
 同时，我们会维护两个按行的运行量：`m_i^(j)` 和 `l_i^(j)`，它们都属于 `R^{B_q}`。`m_i^(j)` 是按行的运行最大值，用于数值稳定地计算 softmax；当 `j` 增长时，它会随着新 key tile 的加入而更新。给定这个运行最大值，我们可以计算未归一化的 softmax 分子：
 
@@ -1537,6 +1551,8 @@ Algorithm 1: FlashAttention-2 forward pass
 
 Before we get into implementing the forward pass in Triton, we collect here a few general tips and tricks for writing Triton kernels. 
 
+在真正开始实现 Triton forward 之前，我们先汇总几条编写 Triton kernel 的通用技巧。
+
 # Triton Tips and Tricks
 
 ### Triton 编写技巧
@@ -1544,6 +1560,8 @@ Before we get into implementing the forward pass in Triton, we collect here a fe
 • You can use print statements in Triton with tl.device_print to debug: https://triton-lang.org/main/python-api/generated/triton.language.device_print.html. There is a setting TRITON_INTERPRET=1 to run the Triton interpreter on CPU, though we have found it buggy. 
 
 在真正开始写 Triton forward 前，我们先给出一些通用技巧：
+
+• 可以用 `tl.device_print` 在 Triton 中打印调试信息：https://triton-lang.org/main/python-api/generated/triton.language.device_print.html。另有一个 `TRITON_INTERPRET=1` 选项可在 CPU 上运行 Triton 解释器，不过我们发现它有一些 bug。
 
 • When defining block pointers, make sure they have the correct offsets, and that block offsets are multiplied by the appropriate tile sizes. 
 
@@ -1561,6 +1579,8 @@ in the methods of the torch.autograd.Function subclass, as we saw in the weighte
 
 • launch grid 的设置方式为：
 
+正如 weighted sum 示例里那样，这个写法会出现在 `torch.autograd.Function` 子类的方法中。
+
 • Perform matrix multiplications with tl.dot. 
 
 • 矩阵乘法使用 `tl.dot`。
@@ -1577,7 +1597,7 @@ in the methods of the torch.autograd.Function subclass, as we saw in the weighte
 
 (a) 编写一个纯 PyTorch（不使用 Triton）的 `autograd.Function`，实现 FlashAttention-2 的 forward。这个版本会比常规 PyTorch 实现更慢，但它很适合作为 Triton kernel 的调试参考。
 
-Your implementation should take input ??, ??, and ?? as well as a flag is_causal and produce the output ?? and the logsumexp value ??. You can ignore the is_causal flag for this task. The autograd.Function forward should then save ??, ??, ??, ?? , ?? for the backward pass and return ??. Remember that the implementation of the forward method of autograd.Function always takes the context as its first parameter. Any autograd.Function class needs to implement a backward method, but for now you can make it just raise NotImplementedError. If you need something to compare against, you can implement Equation 4 to Equation 6 and Equation 12 in PyTorch and compare your outputs. 
+Your implementation should take input $Q$, $K$, and $V$ as well as a flag `is_causal` and produce the output $O$ and the logsumexp value $L$. You can ignore the `is_causal` flag for this task. The `autograd.Function.forward` should then save $L$, $Q$, $K$, $V$, and $O$ for the backward pass and return $O$. Remember that the implementation of the `forward` method of `autograd.Function` always takes the context as its first parameter. Any `autograd.Function` class needs to implement a `backward` method, but for now you can make it just raise `NotImplementedError`. If you need something to compare against, you can implement Equation 4 to Equation 6 and Equation 12 in PyTorch and compare your outputs. 
 
 你的实现应当接收 `Q`、`K`、`V` 和 `is_causal` 标志，并输出 `O` 和 logsumexp 值 `L`。对于这一小问，可以忽略 `is_causal`。`autograd.Function.forward` 还应把 backward 所需的 `Q`、`K`、`V`、`O` 和 `L` 保存起来，并返回输出。记住，`autograd.Function` 的 `forward` 方法总是把 `ctx` 作为第一个参数。任何 `autograd.Function` 都必须实现一个 `backward` 方法，但暂时你可以让它直接抛出 `NotImplementedError`。如果你需要参考，可以先用 PyTorch 按式 (4) 到式 (6) 以及式 (12) 实现一个版本，对照输出是否一致。
 
@@ -1601,9 +1621,9 @@ tile size 由你自己决定，但请确保至少为 `16 × 16`。测试时我�
 
 • 调试时，建议把 Triton 中的每一步结果与 (a) 中写出的 tiled PyTorch 实现逐步对比。
 
-• Your launch grid should be set as (????, batch_size), meaning each Triton program instance will load only elements from a single batch index, and only read/write to a single query tile of ??, ??, and ??. 
+• Your launch grid should be set as $( T _ { q } , \text { batch_size } )$, meaning each Triton program instance will load only elements from a single batch index, and only read/write to a single query tile of $Q$, $O$, and $L$. 
 
-• 你的 launch grid 应设为 `(num_query_tiles, batch_size)`，也就是说，每个 Triton program instance 只会访问单个 batch index，并且只会读写 `Q`、`K`、`V` 的一个 query tile。
+• 你的 launch grid 应设为 `(num_query_tiles, batch_size)`，也就是说，每个 Triton program instance 只会访问单个 batch index，并且只会读写 `Q`、`O`、`L` 的一个 query tile。
 
 • The kernel should only have a single loop, which will iterate key tiles $1 \leq j \leq T _ { k }$ . 
 
@@ -1658,7 +1678,7 @@ Q_block_ptr = tl.make_block_ptr(
 
 ```
 
-where scale is √1?? $\textstyle { \frac { 1 } { \sqrt { d } } }$ and Q_TILE_SIZE and K_TILE_SIZE are $B _ { q }$ and $B _ { k }$ respectively. You can tune these later. 
+where `scale` is $\textstyle { \frac { 1 } { \sqrt { d } } }$ and `Q_TILE_SIZE` and `K_TILE_SIZE` are $B _ { q }$ and $B _ { k }$ respectively. You can tune these later. 
 
 These additional guidelines may help you avoid precision issues: 
 
@@ -1686,7 +1706,7 @@ Notice that unlike the standard backward pass in Equation 7 to Equation 11, we
 
 ### 题目（flash_backward）：FlashAttention-2 反向传播（5 分）
 
-Implement the backward pass for your FlashAttention-2 autograd.Function using PyTorch (not Triton) and torch.compile. Your implementation should take the ??, ??, ?? , ??, ????, and ?? tensors as inputs, and return ????, ???? and ???? . Remember to compute and use the ?? vector. You may follow along the computations of Equation 13 to Equation 19. 
+Implement the backward pass for your FlashAttention-2 autograd.Function using PyTorch (not Triton) and `torch.compile`. Your implementation should take the $Q$, $K$, $V$, $O$, $dO$, and $L$ tensors as inputs, and return $dQ$, $dK$, and $dV$. Remember to compute and use the $D$ vector. You may follow along the computations of Equation 13 to Equation 19. 
 
 使用 PyTorch（不是 Triton）加 `torch.compile`，为你的 FlashAttention-2 `autograd.Function` 实现 backward。你的实现应当接收 forward 中保存的各个张量，并输出 `dQ`、`dK` 和 `dV`。记得计算并使用向量 `D`。你可以沿着式 (13) 到式 (19) 的计算顺序实现。
 
@@ -1718,7 +1738,7 @@ Deliverable: A table of results comparing your implementation of FlashAttention-
 
 ## 4.2.3 可选：Triton backward
 
-If you’re interested in getting more practice with Triton and/or having a fast leaderboard submission, we provide the tiled FlashAttention-2 backward pass below which you can implement in Triton. Algorithm 2 shows the FlashAttention-2 backward pass as it should be implemented in Triton. A key trick here is to compute ?? twice, once for ???? and again for ???? and ???? . This lets us skip synchronization across thread blocks, meaning we can avoid slow atomics. 
+If you’re interested in getting more practice with Triton and/or having a fast leaderboard submission, we provide the tiled FlashAttention-2 backward pass below which you can implement in Triton. Algorithm 2 shows the FlashAttention-2 backward pass as it should be implemented in Triton. A key trick here is to compute $P$ twice, once for $dQ$ and again for $dK$ and $dV$. This lets us skip synchronization across thread blocks, meaning we can avoid slow atomics. 
 
 如果你想进一步练习 Triton，或者想冲排行榜，我们还提供了 tiled FlashAttention-2 backward 的思路，你可以自行用 Triton 实现。算法 2 展示了应如何在 Triton 中写出 FlashAttention-2 backward。这里的关键技巧是把某些量计算两次：一遍用于 `dQ`，另一遍用于 `dK` 和 `dV`。这样我们就不需要跨 thread block 同步，也就避免了昂贵的原子操作。
 
@@ -1858,11 +1878,19 @@ worker an instance of a program that’s participating in the distributed traini
 
 world size The number of total workers in a process group. 
 
+`world size`：一个进程组中的 worker 总数。
+
 global rank An integer ID (between 0 and world_size-1) that uniquely identifies a worker in the process group. For example, for world size of two, one process will have global rank 0 (the master process) and the other process will have rank 1. 
+
+`global rank`：一个整数 ID（范围是 `0` 到 `world_size - 1`），用于在进程组中唯一标识某个 worker。比如 world size 为 2 时，一个进程的 global rank 为 0（主进程），另一个则为 1。
 
 local world size When running applications across different nodes, the local world size is the number of workers running locally on a given node. For example, if we have an application that spawns 4 workers on 2 nodes each, the world size would be 8 and the local world size would be 4. Note that when running on a single node, the local world size of a worker is equivalent to the (global) world size. 
 
+`local world size`：当应用跨多个节点运行时，local world size 表示某个节点本地启动的 worker 数。例如，如果一个应用在 2 个节点上、每个节点启动 4 个 worker，那么 world size 是 8，而 local world size 是 4。若只在单节点上运行，则 local world size 与全局 world size 相同。
+
 local rank An integer ID (between 0 and local_world_size-1) that uniquely identifies the index of a local worker on the machine. For example, if we have an application that spawns 4 processes on 2 nodes each, each node would have workers with local ranks 0, 1, 2, and 3. Note that when running a single-node multi-process distributed application, the local rank of a process is equivalent to its global rank. 
+
+`local rank`：一个整数 ID（范围是 `0` 到 `local_world_size - 1`），用于唯一标识某台机器上的本地 worker 编号。比如在 2 个节点上每个节点启动 4 个进程时，每台机器上的 local rank 会是 0、1、2、3。若是单节点多进程分布式应用，则某个进程的 local rank 与它的 global rank 相同。
 
 ![](images/e69b9ca9ade3f00e9f6c7b30cc09e56b0c4c146e2fad412d40efd55fa62a6a09.jpg)
 
@@ -1875,6 +1903,8 @@ LOCAL RANK GLOBAL RANK NODE RANK
 MACHINE2
 
 Figure 3: A schematic representation of a distributed application running on 2 nodes with a world size of 8. Each worker process is identified by a global rank (from 0 to 7) and a local rank (from 0 to 3). Figure taken from https://lightning.ai/docs/fabric/stable/advanced/distributed_communication.html
+
+图 3：一个运行在 2 个节点上、world size 为 8 的分布式应用示意图。每个 worker 进程都由一个 global rank（0 到 7）和一个 local rank（0 到 3）标识。图片引自：https://lightning.ai/docs/fabric/stable/advanced/distributed_communication.html
 
 # 5.1.1 Best Practices for Benchmarking Distributed Applications
 
@@ -1947,15 +1977,15 @@ Here are the steps for naïvely doing distributed data parallel training. Initia
 
 朴素分布式数据并行训练的步骤如下。起初，每个设备都构造一个随机初始化的模型。我们使用 `broadcast` 集体通信操作，把 rank 0 上的模型参数发送给所有其他 rank。这样在训练开始时，每个设备都持有一份相同的模型参数和优化器状态（例如 Adam 中累积的梯度统计量）。
 
-1. Given a batch with ?? examples, the batch is sharded and each device receives ??/?? disjoint examples (where ?? is the number of devices used for data parallel training). ?? should divide ??, otherwise some ranks would do more work than others, and the step is bottlenecked by the slowest. 
+1. Given a batch with $n$ examples, the batch is sharded and each device receives $n / d$ disjoint examples (where $d$ is the number of devices used for data parallel training). $d$ should divide $n$, otherwise some ranks would do more work than others, and the step is bottlenecked by the slowest. 
 
 1. 给定一个包含 `B` 个样本的 batch，把它切分到多个设备上，每个设备接收 `B / N_DP` 个互不重叠的样本，其中 `N_DP` 是数据并行使用的设备数。`N_DP` 应整除 `B`，否则不同 rank 的工作量会不一致，而整个 step 会被最慢的 rank 拖住。
 
-2. Each device uses its local copy of the model parameters to run a forward pass on its ??/?? examples and a backward pass to calculate the gradients. Note that at this point, each device holds the gradients computed from the ??/?? examples it received. 
+2. Each device uses its local copy of the model parameters to run a forward pass on its $n / d$ examples and a backward pass to calculate the gradients. Note that at this point, each device holds the gradients computed from the $n / d$ examples it received. 
 
 2. 每个设备用自己的模型参数副本，对本地的 `B / N_DP` 个样本执行 forward 和 backward，得到本地梯度。此时每个设备只持有由自己那部分样本计算出的梯度。
 
-3. We then use the all-reduce collective communication operation to average the gradients across the different devices, so each device holds the gradients averaged across all ?? examples. 
+3. We then use the all-reduce collective communication operation to average the gradients across the different devices, so each device holds the gradients averaged across all $n$ examples. 
 
 3. 接着，我们使用 `all-reduce` 把不同设备上的梯度做平均，这样每个设备都会持有基于整个 batch 的平均梯度。
 
@@ -2126,6 +2156,8 @@ Deliverable: Implement a container class to handle distributed data parallel tra
 
 Then, to execute the tests, run uv run pytest tests/test_ddp.py. We recommend running the tests multiple times (e.g., 5) to ensure that it passes reliably. 
 
+提交内容：实现这个用于分布式数据并行训练的容器类。该类应能够把梯度通信与 backward 计算重叠。为测试你的 DDP 类，请先实现 `adapters.get_ddp` 以及 `adapters.ddp_on_after_backward`（后者可选，取决于你的实现）。然后运行 `uv run pytest tests/test_ddp.py`。我们建议多运行几次（例如 5 次），确保它能稳定通过。
+
 # Problem (ddp_overlap_individual_parameters_benchmarking):  DDP Overlapping Individual Parameters Benchmarking (1 point)
 
 ### 题目（ddp_overlap_individual_parameters_benchmarking）：逐参数通信重叠 DDP 的基准测试（1 分）
@@ -2176,6 +2208,10 @@ Deliverable: Implement a container class to handle optimizer state sharding. To 
 
 Now that we’ve implemented optimizer state sharding, let’s analyze its effect on the peak memory usage during training and its runtime overhead. 
 
+提交内容：实现这个用于处理优化器状态分片的容器类。为测试你的 sharded optimizer，请先实现 `adapters.get_sharded_optimizer`，然后运行 `uv run pytest tests/test_sharded_optimizer.py`。我们建议多运行几次（例如 5 次），确保测试稳定通过。
+
+现在我们已经实现了优化器状态分片，接下来分析它对训练峰值显存与运行时开销的影响。
+
 # Problem (optimizer_state_sharding_accounting):  Optimizer State Sharding Accounting (5 points)
 
 ### 题目（optimizer_state_sharding_accounting）：优化器状态分片的开销分析（5 分）
@@ -2196,7 +2232,7 @@ Deliverable: 2-3 sentence response with your timings.
 
 提交内容：2 至 3 句话，并附带你的计时结果。
 
-(c) How does our approach to optimizer state sharding differ from ZeRO stage 1 (described as ZeRO-DP ?????? in S. Rajbhandari, J. Rasley, O. Ruwase, and Y. He [5])? 
+(c) How does our approach to optimizer state sharding differ from ZeRO stage 1 (described as ZeRO-DP `P_os` in S. Rajbhandari, J. Rasley, O. Ruwase, and Y. He [5])? 
 
 (c) 我们这里的优化器状态分片方案，与 ZeRO stage 1（在 Rajbhandari 等人 [5] 中称为 ZeRO-DP）有何不同？
 
@@ -2312,35 +2348,35 @@ For a more detailed treatment of TPU/GPU topologies and parallelism strategies, 
 
 ## 8.1 通信原语
 
-Our first step will be to understand the communication primitives. In our simplified setting, suppose we have ?? devices numbered $0 , . . . , N - 1$ , and each pair of devices is connected by a link. We’ll also assume each device has ?? egress (i.e. outgoing) bandwidth; in other words, each device can send data to another device at a rate of ?? bytes per second. How might we implement gather and reduce? 
+Our first step will be to understand the communication primitives. In our simplified setting, suppose we have $N$ devices numbered $0, \ldots, N - 1$, and each pair of devices is connected by a link. We’ll also assume each device has $W$ egress (i.e. outgoing) bandwidth; in other words, each device can send data to another device at a rate of $W$ bytes per second. How might we implement gather and reduce? 
 
 我们的第一步，是理解通信原语。在一个简化设定下，假设我们有 `N` 个设备，编号为 `0, ..., N-1`，并且每一对设备之间都通过链路相连。再假设每个设备都有 `W` 的 egress（即出站）带宽，也就是说，每个设备都能以 `W` 字节每秒的速率把数据发给另一个设备。那我们该如何实现 gather 和 reduce 呢？
 
-One common way to implement the all-gather operation is the ring all-gather. Recall that in an allgather, each device ?? starts with a chunk $x _ { i }$ of size $\frac { S } { N }$ , and ends up with the entire $\boldsymbol { x } = [ x _ { 0 } , . . . , x _ { N - 1 } ]$ of size ?? (in bytes). In a ring all-gather, we arrange the devices in a circle. In each step, each device sends its current chunk to the next device to its right, and stores the chunk it received from the device to its left. This process repeats, where each device passes the chunk it just received to the right, and receives a new chunk from the left. After ?? − 1 steps, each device has the entire tensor. 
+One common way to implement the all-gather operation is the ring all-gather. Recall that in an all-gather, each device $i$ starts with a chunk $x _ { i }$ of size $\frac { S } { N }$, and ends up with the entire $\boldsymbol { x } = [ x _ { 0 } , \ldots , x _ { N - 1 } ]$ of size $S$ (in bytes). In a ring all-gather, we arrange the devices in a circle. In each step, each device sends its current chunk to the next device to its right, and stores the chunk it received from the device to its left. This process repeats, where each device passes the chunk it just received to the right, and receives a new chunk from the left. After $N - 1$ steps, each device has the entire tensor. 
 
 实现 all-gather 的一种常见办法是 ring all-gather。回忆一下，在 all-gather 中，每个设备 `i` 起初持有一个大小为 `S / N` 的切片 `x_i`，最终则要获得整个张量 `x = [x_0, ..., x_{N-1}]`，其总大小为 `S` 字节。在 ring all-gather 中，我们把设备排成一个环。在每一步中，每个设备都把当前持有的那个切片发送给右边的邻居，同时从左边的邻居接收一个切片并存储下来。随后，这个过程重复：每个设备把刚刚收到的切片继续向右传，并从左边继续接收一个新的切片。经过 `N - 1` 步后，每个设备就都拥有了完整张量。
 
-In our idealized setting, each device simultaneously transmits a chunk of size $\frac { S } { N }$ in each step, with egress bandwidth ?? , and there are ?? − 1 steps, so the ring all-gather takes $\textstyle { \frac { N - 1 } { N } } { \frac { S } { W } }$ seconds. 
+In our idealized setting, each device simultaneously transmits a chunk of size $\frac { S } { N }$ in each step, with egress bandwidth $W$, and there are $N - 1$ steps, so the ring all-gather takes $\frac { N - 1 } { N } \frac { S } { W }$ seconds. 
 
 在我们这个理想化设定中，每一步中每个设备都同时发送一个大小为 `S / N` 的切片，出站带宽为 `W`，而一共需要 `N - 1` 步，因此 ring all-gather 的时间为：
 
-Next, let’s analyze the ring reduce-scatter. In a reduce-scatter, each device ?? starts with a full tensor $\boldsymbol { x } ^ { ( i ) }$ $\begin{array} { r } { y = \sum _ { i = 0 } ^ { N - 1 } x ^ { ( i ) } } \end{array}$ , but where each device ?? ends up with just a chunk $y _ { i }$ of size $\frac { S } { N }$ . Like the ring all-gather, we’ll start by arranging the devices in a circle. Each device will first divide its tensor $\boldsymbol { x } ^ { ( i ) }$ into ?? chunks $\left\lceil x _ { 0 } ^ { ( i ) } , . . . , x _ { N - 1 } ^ { ( i ) } \right\rceil$ , each of size $\frac { S } { N }$ . We’ll then pass chunks around just like the ring all-gather, except before passing the chunk on, each device adds its contribution to the chunk (which stores a partial sum). Specifically: 
+Next, let’s analyze the ring reduce-scatter. In a reduce-scatter, each device $i$ starts with a full tensor $\boldsymbol { x } ^ { ( i ) }$ of size $S$. We then want to compute the reduction $y = \sum _ { i = 0 } ^ { N - 1 } x ^ { ( i ) }$, but where each device $i$ ends up with just a chunk $y _ { i }$ of size $\frac { S } { N }$. Like the ring all-gather, we’ll start by arranging the devices in a circle. Each device will first divide its tensor $\boldsymbol { x } ^ { ( i ) }$ into $N$ chunks $\left[ x _ { 0 } ^ { ( i ) } , \ldots , x _ { N - 1 } ^ { ( i ) } \right]$, each of size $\frac { S } { N }$. We’ll then pass chunks around just like the ring all-gather, except before passing the chunk on, each device adds its contribution to the chunk (which stores a partial sum). Specifically: 
 
 `((N - 1) / N) * (S / W)` 秒。
 
-For step $t = 1 , . . . , N - 1$ , device ?? does the following: 
+For step $t = 1, \ldots, N - 1$, device $i$ does the following: 
 
 接下来分析 ring reduce-scatter。在 reduce-scatter 中，每个设备 `i` 起初持有一个完整张量 `x^(i)`，总大小为 `S`，我们要计算它们的和 `y = sum_i x^(i)`，但最终设备 `i` 只保留 `y_i` 这个大小为 `S / N` 的切片。和 ring all-gather 一样，我们先把设备排成环。每个设备先把自己的张量 `x^(i)` 划分成 `N` 个切片 `x_0^(i), ..., x_{N-1}^(i)`，每个切片大小为 `S / N`。然后像 ring all-gather 那样在环上传递切片，但不同的是：在传递之前，每个设备都会先把自己对该切片的贡献加进去，因此被传递的是“部分和”。
 
-• If ?? = 1, initialize $y \gets x ^ { ( i ) }$ , which stores the partial sum so far 
+• If $t = 1$, initialize $y \gets x ^ { ( i ) }$, which stores the partial sum so far. 
 
 具体而言，在第 `t = 1, ..., N - 1` 步中，设备 `i` 做以下事情：
 
-• Send chunk $y _ { ( i - t ) \mathrm { m o d } N }$ to device (?? + 1) mod ?? 
+• Send chunk $y _ { ( i - t ) \mathrm { m o d } N }$ to device $( i + 1 ) \mathrm { mod } N$. 
 
 • 若 `t = 1`，先令 `y <- x^(i)`，它用于保存当前的部分和。
 
-• Receive chunk $z _ { ( i - t - 1 ) \mathrm { m o d } N }$ from device (?? − 1) mod ?? 
+• Receive chunk $z _ { ( i - t - 1 ) \mathrm { m o d } N }$ from device $( i - 1 ) \mathrm { mod } N$. 
 
 • 将切片 `y_{(i - t) mod N}` 发给设备 `(i + 1) mod N`。
 
@@ -2348,7 +2384,7 @@ For step $t = 1 , . . . , N - 1$ , device ?? does the following:
 
 • 从设备 `(i - 1) mod N` 接收切片 `z_{(i - t - 1) mod N}`。
 
-After ?? − 1 steps, device ?? then has the full sum for chunk $y _ { i }$ , so ring reduce-scatter takes $\textstyle { \frac { N - 1 } { N } } { \frac { S } { W } }$ seconds, just like ring all-gather. 
+After $N - 1$ steps, device $i$ then has the full sum for chunk $y _ { i }$, so ring reduce-scatter takes $\frac { N - 1 } { N } \frac { S } { W }$ seconds, just like ring all-gather. 
 
 • 更新自己的部分和副本：
 
@@ -2364,27 +2400,27 @@ Instead of implementing all-reduce as a ring reduce-scatter followed by a ring a
 
 如果我们不把 all-reduce 实现成“ring reduce-scatter + ring all-gather”，而是使用题目中给出的另一种算法，那么在相同设定下（每设备出站带宽为 `W`，每个 `x^(i)` 的大小为 `S`），该算法的运行时间是多少？
 
-For step $t = 1 , . . . , N - 1 ,$ device ?? does the following: 
+For step $t = 1, \ldots, N - 1$, device $i$ does the following: 
 
 提交内容：给出一个关于 `N`、`S` 和 `W` 的表达式，并用一句话说明理由。
 
-• If ?? = 1, initialize $y \gets x ^ { ( i ) }$ , which stores the partial sum so far 
+• If $t = 1$, initialize $y \gets x ^ { ( i ) }$, which stores the partial sum so far. 
 
-• Send $x ^ { ( ( i - t + 1 ) }$ mod ??) to device (?? + 1) mod ?? 
+• Send $x ^ { ( ( i - t + 1 ) \mathrm { mod } N ) }$ to device $( i + 1 ) \mathrm { mod } N$. 
 
-• Receive $x ^ { ( ( i - t ) }$ mod ??) from device (?? − 1) mod ?? 
+• Receive $x ^ { ( ( i - t ) \mathrm { mod } N ) }$ from device $( i - 1 ) \mathrm { mod } N$. 
 
-• Update your copy of the partial sum: ?? $ y + x ^ { ( ( i - t ) }$ mod ??) 
+• Update your copy of the partial sum: $y \gets y + x ^ { ( ( i - t ) \mathrm { mod } N ) }$. 
 
-In the same setting as above (?? egress bandwidth per device, each $\boldsymbol { x } ^ { ( i ) }$ is of size ??), how long does this algorithm take? 
+In the same setting as above ($W$ egress bandwidth per device, each $\boldsymbol { x } ^ { ( i ) }$ is of size $S$), how long does this algorithm take? 
 
-Deliverable: An answer in terms of ??, ??, and ?? , along with a one-sentence justification. 
+Deliverable: An answer in terms of $N$, $S$, and $W$, along with a one-sentence justification. 
 
 # 8.2 Analyzing Data Parallel
 
 ## 8.2 分析数据并行
 
-Given our communication primitives, we are ready to analyze parallelism strategies. We’ll analyze the parallelization of a single FFN layer. Recall that given input ??, our forward pass is given by the following: 
+Given our communication primitives, we are ready to analyze parallelism strategies. We’ll analyze the parallelization of a single FFN layer. Recall that given input $\boldsymbol { x }$, our forward pass is given by the following: 
 
 有了通信原语之后，我们就可以开始分析并行策略。这里我们以单个 FFN 层为对象。回忆一下，给定输入 `x`，其 forward 为：
 
@@ -2404,11 +2440,11 @@ $$
 \boldsymbol {y} = z \boldsymbol {W} _ {\mathbf {3}}, \tag {23}
 $$
 
-where ?? has shape (??, ??), $W _ { 1 }$ and $W _ { 2 }$ have shape $( D , D _ { \mathrm { F F } } )$ , and $W _ { 3 }$ has shape $( D _ { \mathrm { F F } } , D ) . ~ f$ is our elementwise activation function (e.g. SiLU), and ∗ represents elementwise multiplication. 
+where $\boldsymbol { x }$ has shape $( B , D )$, $W _ { 1 }$ and $W _ { 2 }$ have shape $( D , D _ { \mathrm { F F } } )$, and $W _ { 3 }$ has shape $( D _ { \mathrm { F F } } , D )$. $f$ is our elementwise activation function (e.g. SiLU), and $\ast$ represents elementwise multiplication. 
 
 其中 `x` 形状为 `(B, D)`，`W1` 和 `W2` 形状为 `(D, D_FF)`，`W3` 形状为 `(D_FF, D)`。`f` 是逐元素激活函数（例如 SiLU），`*` 表示逐元素乘法。
 
-It will also be useful to explicitly write out the backward pass. Recall that given ???? with shape $( B , D )$ , the backward pass is given by the following: 
+It will also be useful to explicitly write out the backward pass. Recall that given $\boldsymbol { d } \boldsymbol { y }$ with shape $( B , D )$, the backward pass is given by the following: 
 
 写出 backward 也会有帮助。给定 `dy`（形状为 `(B, D)`），其 backward 为：
 
@@ -2444,7 +2480,7 @@ where ∗ represents elementwise multiplication.
 
 其中 `*` 仍表示逐元素乘法。
 
-Recall that in data parallelism with $N _ { \mathrm { D P } }$ devices, we shard our input ?? into shard $\pmb { x } ^ { ( i ) }$ of size $\begin{array} { r } { \left( \frac { B } { N _ { \mathrm { D P } } } , D \right) } \end{array}$ . The forward pass proceeds as usual without any collectives, producing activations $\boldsymbol y ^ { ( i ) }$ of size ( ????DP , ??) $\left( \overset { \cdot } { N } _ { \mathrm { D P } } ^ { \mathrm { ~ D ~ } } , D \right)$ . In the backward pass, proceeding as usual with the batch-sharded activations, device ?? ends up with gradients 
+Recall that in data parallelism with $N _ { \mathrm { D P } }$ devices, we shard our input $\boldsymbol { x }$ into shards $\pmb { x } ^ { ( i ) }$ of size $\left( \frac { B } { N _ { \mathrm { D P } } } , D \right)$. The forward pass proceeds as usual without any collectives, producing activations $\boldsymbol { y } ^ { ( i ) }$ of size $\left( \frac { B } { N _ { \mathrm { D P } } } , D \right)$. In the backward pass, proceeding as usual with the batch-sharded activations, device $i$ ends up with gradients 
 
 回忆数据并行：若使用 `N_DP` 个设备，我们把输入 `x` 划分成形状为 `(B / N_DP, D)` 的分片 `x^(i)`。前向传播在 batch 分片上照常执行，不需要任何集体通信，并得到同样按 batch 分片的输出 `y^(i)`。在 backward 中，每个设备最后得到的是它那一部分 batch 对应的局部梯度：
 
@@ -2460,7 +2496,7 @@ $$
 \boldsymbol {d} \boldsymbol {W} _ {\mathbf {1}} ^ {(\boldsymbol {i})} = \boldsymbol {x} ^ {(\boldsymbol {i}) ^ {\top}} \boldsymbol {d x} _ {\mathbf {1}} ^ {(\boldsymbol {i})}, \tag {33}
 $$
 
-where instead of summing over all ?? outer products, we only have the partial sum over the ????DP $\frac { B } { N _ { \mathrm { D P } } }$ outer products for our shard of the input. Then, we need to do an all-reduce across devices to get the full gradients $d W _ { 3 } , d W _ { 2 }$ , and $d \mathbf { W _ { 1 } }$ . 
+where instead of summing over all $B$ outer products, we only have the partial sum over the $\frac { B } { N _ { \mathrm { D P } } }$ outer products for our shard of the input. Then, we need to do an all-reduce across devices to get the full gradients $d W _ { 3 } , d W _ { 2 }$, and $d \mathbf { W _ { 1 } }$. 
 
 这些只是基于各自 batch 分片的部分和，而不是全 batch 的完整梯度。因此，随后我们需要跨设备对 `dW3`、`dW2` 和 `dW1` 执行 all-reduce，才能得到完整梯度。
 
@@ -2468,11 +2504,11 @@ where instead of summing over all ?? outer products, we only have the partial su
 
 ### 题目（data_parallel_calcs）：数据并行计算题（3 分）
 
-We now have everything we need to calculate when data parallelism becomes communication bottlenecked. Let ?? (in FLOP/s) denote the device accelerator speed, and ?? (in bytes per second) denote each device’s egress bandwidth. We can then compute the computation time and communication time. Because computation and communication can be overlapped, we are bottlenecked when communication time becomes larger than computation time. We’ll assume that all weights and activations are in FP16 (i.e. two bytes). 
+We now have everything we need to calculate when data parallelism becomes communication bottlenecked. Let $C$ (in FLOP/s) denote the device accelerator speed, and $W$ (in bytes per second) denote each device’s egress bandwidth. We can then compute the computation time and communication time. Because computation and communication can be overlapped, we are bottlenecked when communication time becomes larger than computation time. We’ll assume that all weights and activations are in FP16 (i.e. two bytes). 
 
 现在，我们已经可以分析数据并行何时会被通信瓶颈卡住。设设备算力为 `C`（单位 FLOP/s），每设备出站带宽为 `W`（单位 bytes/s）。由于计算与通信可以重叠，因此当通信时间大于计算时间时，通信就成为瓶颈。假设所有权重与激活都使用 FP16（即每个元素 2 字节）。
 
-(a) How many FLOPs are required to compute the backward pass, with $N _ { \mathrm { D P } }$ data parallelism? You can ignore all non-matmul operations. Recall that a matmul $( A , B ) ( B , C ) \to ( A , C )$ takes 2?????? flops. 
+(a) How many FLOPs are required to compute the backward pass, with $N _ { \mathrm { D P } }$ data parallelism? You can ignore all non-matmul operations. Recall that a matmul $( A , B ) ( B , C ) \to ( A , C )$ takes $2 A B C$ FLOPs. 
 
 (a) 在使用 `N_DP` 个数据并行设备时，backward 需要多少 FLOPs？可以忽略所有非 matmul 操作。回忆：一个 `(A, B) (B, C) -> (A, C)` 的矩阵乘法需要 `2ABC` FLOPs。
 
@@ -2484,7 +2520,7 @@ Deliverable: An answer in terms of $B , D , D _ { \mathrm { F F } }$ , and $N _ 
 
 (b) 在使用 `N_DP` 个数据并行设备时，backward 需要多少通信时间？
 
-Deliverable: An answer in terms of a subset of ??, ??, $D _ { \mathrm { F F } } ,  { N _ { \mathrm { D P } } }$ , and ?? , along with a onesentence justification. 
+Deliverable: An answer in terms of a subset of $B$, $D$, $D _ { \mathrm { F F } }$, $N _ { \mathrm { D P } }$, and $W$, along with a one-sentence justification. 
 
 提交内容：给出一个表达式，并用一句话说明理由。
 
@@ -2492,7 +2528,7 @@ Deliverable: An answer in terms of a subset of ??, ??, $D _ { \mathrm { F F } } 
 
 (c) 固定其他参数不变，`N_DP` 最多可以增长到多大，才不会在 backward 中被通信卡住？
 
-Deliverable: An inequality with $N _ { \mathrm { D P } }$ on one side, and an expression in terms of a subset of $B , D , D _ { \mathrm { F F } } , C ,$ , and ?? on the other, along with a one-sentence justification. 
+Deliverable: An inequality with $N _ { \mathrm { D P } }$ on one side, and an expression in terms of a subset of $B$, $D$, $D _ { \mathrm { F F } }$, $C$, and $W$ on the other, along with a one-sentence justification. 
 
 提交内容：给出一个关于 `N_DP` 的不等式，并附一句话说明。
 
@@ -2500,7 +2536,7 @@ Deliverable: An inequality with $N _ { \mathrm { D P } }$ on one side, and an ex
 
 ## 8.3 分析 FSDP
 
-Next, let’s analyze FSDP. Recall that just like DP, FSDP shards the batch dimension of the inputs and activations. In addition, to save on memory, we also shard the optimWe can shard the weights along either dimension, producing shards $W _ { 1 } ^ { ( i ) } , W _ { 2 } ^ { ( i ) }$ gradi, and ${ W } _ { 3 } ^ { ( i ) }$ and weights. on device ??, each of size ????FF $\frac { D D _ { \mathrm { F F } } } { N _ { \mathrm { F S D P } } }$ ??FSDP 
+Next, let’s analyze FSDP. Recall that just like DP, FSDP shards the batch dimension of the inputs and activations. In addition, to save on memory, we also shard the optimizer states, gradients, and weights. We can shard the weights along either dimension, producing shards $W _ { 1 } ^ { ( i ) } , W _ { 2 } ^ { ( i ) }$, and $W _ { 3 } ^ { ( i ) }$ on device $i$, each of size $\frac { D D _ { \mathrm { F F } } } { N _ { \mathrm { F S D P } } }$. 
 
 接下来分析 FSDP。和 DP 一样，FSDP 也会沿 batch 维切分输入与激活；除此之外，为了节省显存，它还会把权重、梯度与优化器状态做分片。
 
@@ -2560,7 +2596,7 @@ $$
 \boldsymbol {d} \boldsymbol {W} _ {\mathbf {3}} ^ {(i)} = \text { reduce - scatter } \left(\left\{\boldsymbol {d} \boldsymbol {W} _ {\mathbf {3}} ^ {(i)} \right\} _ {i = 0} ^ {N _ {\mathrm{FSDP}} - 1}\right) \tag {44}
 $$
 
-Note that the sharding notation (superscript (??)) is overloaded: the inputs to the reduce-scatter are partial sums on the full weights, while the outputs are full sums on the sharded weights. 
+Note that the sharding notation (superscript $( i )$) is overloaded: the inputs to the reduce-scatter are partial sums on the full weights, while the outputs are full sums on the sharded weights. 
 
 注意这里的分片记号 `(i)` 语义在输入和输出上略有重载：reduce-scatter 的输入是“完整权重上的部分和”，而输出则是“分片权重上的完整和”。
 
@@ -2584,7 +2620,7 @@ Deliverable: Two answers in terms of $B , D , D _ { \mathrm { F F } }$ , and $N 
 
 (b) 在使用 `N_FSDP` 个 FSDP 设备时，backward 需要多少通信时间？forward 又需要多少？
 
-Deliverable: Two answers in terms of a subset of ??, ??, $D _ { \mathrm { F F } } , N _ { \mathrm { F S D P } } .$ , and ?? , along with two one-sentence justifications. 
+Deliverable: Two answers in terms of a subset of $B$, $D$, $D _ { \mathrm { F F } }$, $N _ { \mathrm { F S D P } }$, and $W$, along with two one-sentence justifications. 
 
 提交内容：给出两个表达式，并分别用一句话说明。
 
@@ -2592,7 +2628,7 @@ Deliverable: Two answers in terms of a subset of ??, ??, $D _ { \mathrm { F F } 
 
 (c) 固定其他参数不变，`N_FSDP` 最多能扩展到多大，才不会在 backward 中被通信卡住？forward 呢？
 
-Deliverable: Two inequalities with $N _ { \mathrm { F S D P } }$ on one side, and an expression in terms of a subset of $B , D , D _ { \mathrm { F F } } , C ,$ and ?? on the other, along with two one-sentence justifications. 
+Deliverable: Two inequalities with $N _ { \mathrm { F S D P } }$ on one side, and an expression in terms of a subset of $B$, $D$, $D _ { \mathrm { F F } }$, $C$, and $W$ on the other, along with two one-sentence justifications. 
 
 提交内容：给出两个关于 `N_FSDP` 的不等式，并分别用一句话说明。
 
@@ -2604,7 +2640,7 @@ In practice, FSDP is often combined with a parallelism strategy called tensor pa
 
 在实践中，FSDP 往往会和另一种并行策略结合使用，这就是张量并行（TP）。在 TP 中，我们沿某个权重矩阵的输入维或输出维做分片。沿输入维分片常被称为 “row parallel”，沿输出维分片则称为 “column parallel”。
 
-Specifically, suppose we want to shard the matmul ???? , for ?? with shape $( B , D )$ and $W$ with shape $( D , D _ { \mathrm { F F } } )$ . In column parallel we have shards $W ^ { ( i ) }$ of shape $\begin{array} { r } { \left( D , \frac { D _ { \mathrm { F F } } } { N _ { \mathrm { T P } } } \right) } \end{array}$ , and we have 
+Specifically, suppose we want to shard the matmul $\boldsymbol { x } \boldsymbol { W }$, for $\boldsymbol { x }$ with shape $( B , D )$ and $W$ with shape $( D , D _ { \mathrm { F F } } )$. In column parallel we have shards $W ^ { ( i ) }$ of shape $\left( D , \frac { D _ { \mathrm { F F } } } { N _ { \mathrm { T P } } } \right)$, and we have 
 
 具体地，假设我们要对矩阵乘法 `xW` 做分片，其中 `x` 的形状为 `(B, D)`，`W` 的形状为 `(D, D_FF)`。若采用 column parallel，则每个设备持有的 `W^(i)` 形状为 `(D, D_FF / N_TP)`，并且有：
 
@@ -2612,7 +2648,7 @@ $$
 \boldsymbol {x} \boldsymbol {W} = \text { all - gather } \left(\left\{\boldsymbol {x} \boldsymbol {W} ^ {(i)} \right\} _ {i = 0} ^ {N _ {\mathrm{TP}} - 1}\right). \tag {45}
 $$
 
-On the other hand, for row parallel, we have shards $W ^ { ( i ) }$ of shape $\begin{array} { r } { \left( \frac { D } { N _ { \mathrm { T P } } } , D _ { \mathrm { F F } } \right) } \end{array}$ , and each device also narrows the input ?? into a slice $\pmb { x } ^ { ( i ) }$ with shape $\left( B , \frac { D } { N _ { \mathrm { T P } } } \right)$ TP before doing the matmul. Then, we have 
+On the other hand, for row parallel, we have shards $W ^ { ( i ) }$ of shape $\left( \frac { D } { N _ { \mathrm { T P } } } , D _ { \mathrm { F F } } \right)$, and each device also narrows the input $\boldsymbol { x }$ into a slice $\pmb { x } ^ { ( i ) }$ with shape $\left( B , \frac { D } { N _ { \mathrm { T P } } } \right)$ before doing the matmul. Then, we have 
 
 另一方面，若采用 row parallel，则每个设备持有的 `W^(i)` 形状为 `(D / N_TP, D_FF)`，并且每个设备也会把输入 `x` 缩成一个对应切片 `x^(i)`，其形状为 `(B, D / N_TP)`。然后有：
 
@@ -2620,7 +2656,7 @@ $$
 \boldsymbol {x} \boldsymbol {W} = \text { all   -   reduce } \left(\left\{\boldsymbol {x} ^ {(i)} \boldsymbol {W} ^ {(i)} \right\} _ {i = 0} ^ {N _ {\mathrm{TP}} - 1}\right). \tag {46}
 $$
 
-To parallelize our FFN, we’ll use a specific tensor parallel configuration where $W _ { 1 }$ and $W _ { 2 }$ are column parallel (output-dimension-sharded), while $W _ { 3 }$ is row parallel (input-dimension-sharded). Since the row parallel weight only requires a slice of the input, this configuration lets us skip the all-gather after the column parallel weights. This strategy gives the following forward pass, given input ?? of size (??, ??): 
+To parallelize our FFN, we’ll use a specific tensor parallel configuration where $W _ { 1 }$ and $W _ { 2 }$ are column parallel (output-dimension-sharded), while $W _ { 3 }$ is row parallel (input-dimension-sharded). Since the row parallel weight only requires a slice of the input, this configuration lets us skip the all-gather after the column parallel weights. This strategy gives the following forward pass, given input $\boldsymbol { x }$ of size $( B , D )$: 
 
 为了并行化我们的 FFN，我们采用一个特定的 TP 配置：`W1` 与 `W2` 做 column parallel，而 `W3` 做 row parallel。由于 row parallel 的权重只需要输入的一部分切片，因此这种配置使我们可以跳过 `W1` 和 `W2` 之后原本可能需要的 all-gather。这样，给定形状为 `(B, D)` 的输入 `x`，forward 可以写成：
 
@@ -2656,11 +2692,11 @@ Under the same setting as the DP and FSDP calculations, let’s calculate when T
 
 在与 DP / FSDP 相同的设定下，分析 TP 何时会被通信瓶颈卡住。
 
-(a) Given input ???? of size (??, ??) write out the backward pass of the tensor parallel strategy described above (where $\dot { W } _ { 1 } ^ { ( i ) }$ and $W _ { 2 } ^ { ( i ) }$ have shape $\begin{array} { r } { \left( D , \frac { D _ { \mathrm { F F } } } { N _ { \mathrm { T P } } } \right) } \end{array}$ ??F ?? FP ), and ?? (??)?? ${ W } _ { 3 } ^ { ( i ) }$ has shape $\left( \frac { D _ { \mathrm { F F } } } { N _ { \mathrm { T P } } } , D \right) )$ ?? ( ??FF , . 
+(a) Given input $\boldsymbol { d } \boldsymbol { y }$ of size $( B , D )$, write out the backward pass of the tensor parallel strategy described above (where $W _ { 1 } ^ { ( i ) }$ and $W _ { 2 } ^ { ( i ) }$ have shape $\left( D , \frac { D _ { \mathrm { F F } } } { N _ { \mathrm { T P } } } \right)$, and $W _ { 3 } ^ { ( i ) }$ has shape $\left( \frac { D _ { \mathrm { F F } } } { N _ { \mathrm { T P } } } , D \right)$). 
 
 (a) 给定大小为 `(B, D)` 的输入 `x`，请写出上述张量并行 FFN 策略的 backward 方程。你的表达式应当包含：输入 `x`，分片后的权重 `W1^(i)`、`W2^(i)`、`W3^(i)`，forward 中保存的激活 `x`、`x1^(i)`、`x2^(i)`、`z^(i)`、`y^(i)`，必要的通信原语，以及你认为合适的中间变量。最终方程应能产出每个设备上的 `dW1^(i)`、`dW2^(i)`、`dW3^(i)`，以及 backward 的输出 `dx`。你可以参考第 8.2 节中非分片 FFN 的 backward 并在其基础上改写。
 
-Deliverable: A series of equations describing the backward pass, in terms of ????, sharded weights (?? (??)?? , $\left( W _ { 1 } ^ { ( i ) } , W _ { 2 } ^ { ( i ) } , W _ { 3 } ^ { ( i ) } \right)$ activations saved from the forward pass $\left( x , x _ { 1 } ^ { ( i ) } , x _ { 2 } ^ { ( i ) } , z ^ { ( i ) } , y ^ { ( i ) } \right)$ , communication primitives, and any intermediate variables you’d like to define. The equations should produce each device’s gradients $d W _ { 1 } ^ { ( i ) } , d W _ { 2 } ^ { ( i ) } , d W _ { 3 } ^ { ( i ) }$ (??)?? , ???? (??)?? , ???? (??)?? , and the backward pass output ????. Feel free to reference the non-sharded backward pass in Section 8.2 and modify it. 
+Deliverable: A series of equations describing the backward pass, in terms of $\boldsymbol { d } \boldsymbol { y }$, sharded weights $\left( W _ { 1 } ^ { ( i ) } , W _ { 2 } ^ { ( i ) } , W _ { 3 } ^ { ( i ) } \right)$, activations saved from the forward pass $\left( x , x _ { 1 } ^ { ( i ) } , x _ { 2 } ^ { ( i ) } , z ^ { ( i ) } , y ^ { ( i ) } \right)$, communication primitives, and any intermediate variables you’d like to define. The equations should produce each device’s gradients $d W _ { 1 } ^ { ( i ) } , d W _ { 2 } ^ { ( i ) } , d W _ { 3 } ^ { ( i ) }$, and the backward pass output $\boldsymbol { d } \boldsymbol { x }$. Feel free to reference the non-sharded backward pass in Section 8.2 and modify it. 
 
 提交内容：一组描述 backward 的方程。
 
@@ -2676,7 +2712,7 @@ Deliverable: Two answers in terms of $B , D , D _ { \mathrm { F F } }$ , and $N 
 
 (c) 在使用 `N_TP` 个张量并行设备时，forward 需要多少通信时间？backward 又需要多少？
 
-Deliverable: Two answers in terms of a subset of $B , D , D _ { \mathrm { F F } } , N _ { \mathrm { T P } }$ , and ?? , along with two one-sentence justifications. 
+Deliverable: Two answers in terms of a subset of $B$, $D$, $D _ { \mathrm { F F } }$, $N _ { \mathrm { T P } }$, and $W$, along with two one-sentence justifications. 
 
 提交内容：两个表达式，并分别用一句话说明。
 
@@ -2684,7 +2720,7 @@ Deliverable: Two answers in terms of a subset of $B , D , D _ { \mathrm { F F } 
 
 (d) 固定其他参数不变，`N_TP` 最多可以扩展到多大，才不会在 backward 中被通信卡住？forward 呢？
 
-Deliverable: Two inequalities with $N _ { \mathrm { T P } }$ on one side, and an expression in terms of a subset of $B , D , D _ { \mathrm { F F } } , C ,$ and ?? on the other, along with two one-sentence justifications. 
+Deliverable: Two inequalities with $N _ { \mathrm { T P } }$ on one side, and an expression in terms of a subset of $B$, $D$, $D _ { \mathrm { F F } }$, $C$, and $W$ on the other, along with two one-sentence justifications. 
 
 提交内容：给出两个关于 `N_TP` 的不等式，并分别用一句话说明。
 
@@ -2700,11 +2736,11 @@ In this section, we’ll consider a simplified setting where someone comes to yo
 
 在本节中，我们考虑一个简化情形：有人把问题中所有参数（batch size、模型规模、带宽、加速器算力）都给了你，你的任务是选择一个 FSDP 与 TP 的组合配置，使得总设备数尽可能大，同时仍然保持“计算受限”，而不是“通信受限”。
 
-Let’s first walk through the mechanics of combining FSDP with TP. Each device will have a TP rank ?? = $0 , . . . , N _ { \mathrm { T P } } - 1$ and an FSDP rank $j = 0 , . . . , N _ { \mathrm { F S D P } } - 1$ , forming a 2D grid with $N = N _ { \mathrm { T P } } N _ { \mathrm { F S D P } }$ devices total. Following TP, we’ll first shard $W _ { 1 }$ and $W _ { 2 }$ along the output dimension, and $W _ { 3 }$ along the input dimension. As a result, we’ll have to insert a TP-style all-reduce on the activations. Next, applying FSDP, we’ll shard the batch dimension of the inputs, and we’ll also further shard each weight matrix along whichever dimension wasn’t sharded by TP. Then, we’ll have to insert FSDP-style all-gathers on the weights before doing our TP-style forward/backward passes, and reduce-scatters on the weight gradients after our TP-style backward pass. 
+Let’s first walk through the mechanics of combining FSDP with TP. Each device will have a TP rank $i = 0, \ldots, N _ { \mathrm { T P } } - 1$ and an FSDP rank $j = 0, \ldots, N _ { \mathrm { F S D P } } - 1$, forming a 2D grid with $N = N _ { \mathrm { T P } } N _ { \mathrm { F S D P } }$ devices total. Following TP, we’ll first shard $W _ { 1 }$ and $W _ { 2 }$ along the output dimension, and $W _ { 3 }$ along the input dimension. As a result, we’ll have to insert a TP-style all-reduce on the activations. Next, applying FSDP, we’ll shard the batch dimension of the inputs, and we’ll also further shard each weight matrix along whichever dimension wasn’t sharded by TP. Then, we’ll have to insert FSDP-style all-gathers on the weights before doing our TP-style forward/backward passes, and reduce-scatters on the weight gradients after our TP-style backward pass. 
 
 先来看 FSDP 与 TP 结合时的机制。每个设备都有一个 TP rank `i = 0, ..., N_TP - 1` 和一个 FSDP rank `j = 0, ..., N_FSDP - 1`，从而形成一个大小为 `N = N_TP * N_FSDP` 的二维设备网格。沿 TP 方向，我们先把 `W1` 和 `W2` 沿输出维分片，把 `W3` 沿输入维分片；因此激活上会引入 TP 风格的 all-reduce。再沿 FSDP 方向，我们把输入的 batch 维分片，并沿“TP 尚未切分的那个维度”继续把每个权重矩阵再切一刀。于是，在执行 TP 风格的 forward / backward 前，我们需要先做 FSDP 风格的权重 all-gather；在 TP 风格 backward 后，我们还要对权重梯度做 reduce-scatter。
 
-The result is that each device $( i , j )$ holds the weight shards $W _ { 1 } ^ { ( i , j ) }$ and $W _ { 2 } ^ { ( i , j ) }$ with shape $\begin{array} { r } { \left( \frac { D } { N _ { \mathrm { F S D P } } } , \frac { D _ { \mathrm { F F } } } { N _ { \mathrm { T P } } } \right) } \end{array}$ ??FF ) and ?? (??,??)?? $W _ { 3 } ^ { ( i , j ) }$ with shape $\left( \frac { D _ { \mathrm { F F } } } { N _ { \mathrm { T P } } } , \frac { D } { N _ { \mathrm { F S D P } } } \right)$ . We can then write out the forward pass as the following, given batch-sharded input $\pmb { x } ^ { ( j ) }$ of size ( ????FSDP , ??): $\scriptstyle \left( { \frac { B } { N _ { \mathrm { F S D P } } } } , D \right)$ 
+The result is that each device $( i , j )$ holds the weight shards $W _ { 1 } ^ { ( i , j ) }$ and $W _ { 2 } ^ { ( i , j ) }$ with shape $\left( \frac { D } { N _ { \mathrm { F S D P } } } , \frac { D _ { \mathrm { F F } } } { N _ { \mathrm { T P } } } \right)$, and $W _ { 3 } ^ { ( i , j ) }$ with shape $\left( \frac { D _ { \mathrm { F F } } } { N _ { \mathrm { T P } } } , \frac { D } { N _ { \mathrm { F S D P } } } \right)$. We can then write out the forward pass as the following, given batch-sharded input $\pmb { x } ^ { ( j ) }$ of size $\left( \frac { B } { N _ { \mathrm { F S D P } } } , D \right)$: 
 
 最终，每个设备 `(i, j)` 持有的权重切片为：`W1^(i, j)`、`W2^(i, j)`，形状均为 `(D / N_FSDP, D_FF / N_TP)`；以及 `W3^(i, j)`，形状为 `(D_FF / N_TP, D / N_FSDP)`。给定 batch 分片后的输入 `x^(j)`，其形状为 `(B / N_FSDP, D)`，forward 可写成：
 
@@ -2740,7 +2776,7 @@ $$
 \boldsymbol {y} ^ {(j)} = \text { all - reduce } \left(\left\{\boldsymbol {y} ^ {(i, j)} \right\} _ {i = 0} ^ {N _ {\mathrm{TP}} - 1}\right), \tag {59}
 $$
 
-ending up with batch-sharded output $\boldsymbol y ^ { ( j ) }$ of size $\begin{array} { r } { \left( \frac { B } { N _ { \mathrm { F S D P } } } , D \right) } \end{array}$ ( ??FSDP . We’ll omit the backward pass for brevity in this section, and just focus on the forward pass. But at this point, you should have all the information you need to write it out yourself. 
+ending up with batch-sharded output $\boldsymbol y ^ { ( j ) }$ of size $\left( \frac { B } { N _ { \mathrm { F S D P } } } , D \right)$. We’ll omit the backward pass for brevity in this section, and just focus on the forward pass. But at this point, you should have all the information you need to write it out yourself. 
 
 最终得到的输出 `y^(j)` 仍然按 batch 维分片，形状为 `(B / N_FSDP, D)`。为简洁起见，本节省略 backward，但你现在应该已经有足够信息自己写出它。
 
@@ -2756,7 +2792,7 @@ Under the same setting as the calculations so far, let’s calculate when 2D par
 
 (a) 在使用 `N_FSDP` 个 FSDP 分片和 `N_TP` 个 TP 分片时，forward 需要多少 FLOPs？
 
-Deliverable: An answer in terms of ??, $D , D _ { \mathrm { F F } } , N _ { \mathrm { F S D P } }$ , and $N _ { \mathrm { T P } }$ , along with a one-sentence justification. 
+Deliverable: An answer in terms of $B$, $D$, $D _ { \mathrm { F F } }$, $N _ { \mathrm { F S D P } }$, and $N _ { \mathrm { T P } }$, along with a one-sentence justification. 
 
 提交内容：给出一个关于 `B`、`D`、`D_FF`、`N_FSDP` 和 `N_TP` 的表达式，并用一句话说明。
 
@@ -2764,7 +2800,7 @@ Deliverable: An answer in terms of ??, $D , D _ { \mathrm { F F } } , N _ { \mat
 
 (b) 在这种 `FSDP + TP` 设定下，forward 需要多少通信时间？假设沿 FSDP 轴与 TP 轴的通信可以重叠（也就是说，两条轴上的 collective 可以同时进行）。
 
-Deliverable: An answer in terms of a subset of ??, $D , D _ { \mathrm { F F } } , N _ { \mathrm { F S D P } } , N _ { \mathrm { T P } }$ , and ?? , along with a one-sentence justification. Hint: The answer should be expressed as a max between two quantities (the FSDP and TP collective costs), since the two can be overlapped. 
+Deliverable: An answer in terms of a subset of $B$, $D$, $D _ { \mathrm { F F } }$, $N _ { \mathrm { F S D P } }$, $N _ { \mathrm { T P } }$, and $W$, along with a one-sentence justification. Hint: The answer should be expressed as a `max(...)` between two quantities (the FSDP and TP collective costs), since the two can be overlapped. 
 
 提交内容：给出一个表达式，并用一句话说明。提示：答案应写成两个量的 `max(...)`，分别对应 FSDP 与 TP 方向上的通信成本，因为二者是可重叠的。
 
@@ -2772,7 +2808,7 @@ Deliverable: An answer in terms of a subset of ??, $D , D _ { \mathrm { F F } } 
 
 (c) 在 `N_TP` 与 `N_FSDP` 取最优平衡时，总设备数 `N = N_TP * N_FSDP` 最多能扩展到多大，forward 才会被通信卡住？
 
-Deliverable: An inequality with ?? on one side, and an expression in terms of a subset of ??, ??, $D _ { \mathrm { F F } } , C ,$ , and ?? on the other, along with a few sentences and equations as justification. 
+Deliverable: An inequality with $N$ on one side, and an expression in terms of a subset of $B$, $D$, $D _ { \mathrm { F F } }$, $C$, and $W$ on the other, along with a few sentences and equations as justification. 
 
 提交内容：给出一个关于 `N` 的不等式，并用几句文字与公式说明理由。
 
@@ -2780,7 +2816,7 @@ Deliverable: An inequality with ?? on one side, and an expression in terms of a 
 
 (d) 现在假设 FSDP 轴和 TP 轴上的 collective 不能重叠，因为它们共享相同的网络资源。那么在最优的 `N_TP` 与 `N_FSDP` 设定下，总设备数 `N = N_TP * N_FSDP` 最多能扩展到多大，forward 才会被通信卡住？这里你不必纠结 `N_TP` 和 `N_FSDP` 必须取整数。
 
-Deliverable: An inequality with ?? on one side, and an expression in terms of a subset of ??, $D , D _ { \mathrm { F F } } , C ,$ and ?? on the other, along with a few sentences and equations as justification. 
+Deliverable: An inequality with $N$ on one side, and an expression in terms of a subset of $B$, $D$, $D _ { \mathrm { F F } }$, $C$, and $W$ on the other, along with a few sentences and equations as justification. 
 
 提交内容：给出一个关于 `N` 的不等式，并用几句文字与公式说明理由。
 
@@ -2839,21 +2875,39 @@ Some ideas for improvement and for making sure your model fits:
 
 • Implement fused AdamW 
 
+• 实现融合版 AdamW。
+
 • The base implementation is materializing the full logits ([batch, seq_len, vocab_size]). Write a kernel that fuses the LM head and your cross-entropy loss. You can also have it compute the backward pass immediately in a fused manner 
+
+• 当前基础实现会显式物化完整 logits（`[batch, seq_len, vocab_size]`）。你可以编写一个 kernel，把 LM head 与 cross-entropy loss 融合起来，甚至进一步把 backward 也一并融合进去。
 
 • Improve FlashAttention 
 
+• 改进 FlashAttention。
+
 ‣ Implement the backward pass in Triton, not just torch.compile (see Section 4.2.3) 
+
+‣ 用 Triton 实现 backward，而不只是依赖 `torch.compile`（见第 4.2.3 节）。
 
 ‣ Do two passes over your input for the backward pass, one for dQ and another for dK and dV, to avoid atomics or synchronization between blocks 
 
+‣ 对 backward 输入做两遍遍历：一遍算 `dQ`，另一遍算 `dK` 和 `dV`，以避免原子操作或 block 间同步。
+
 ‣ Stop program instances early when doing causal masking, skipping tiles that are guaranteed to be all zero 
+
+‣ 在做 causal masking 时尽早结束某些 program instance，直接跳过那些确定全为 0 的 tile。
 
 ‣ Separate the non-masked tiles from the tile diagonals, computing the first without ever comparing indices, and the second with a single comparison 
 
+‣ 把未被 mask 的 tile 与对角线附近的 tile 分开处理：前者完全不做索引比较，后者只做一次比较。
+
 ‣ Use TMA (Tensor Memory Accelerator) functionality on architectures later than Hopper, following a similar pattern to our tutorial 
 
+‣ 在 Hopper 之后的架构上使用 TMA（Tensor Memory Accelerator），实现方式可参考教程中的类似模式。
+
 • Use activation checkpointing to trade runtime speed for memory savings only if you need it 
+
+• 只有在确实需要时，再用 activation checkpointing 以运行时间换取显存节省。
 
 # Problem (leaderboard):  Leaderboard: fastest training step (10 points)
 
